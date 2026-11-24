@@ -1,7 +1,7 @@
--- JuzeppeOS 0.6.1 Sandstone installer / launcher
+-- JuzeppeOS 0.6.2 Sandstone installer / launcher
 local args={...}
 local root="/juzeppe"
-local version="0.6.1"
+local version="0.6.2"
 local function read(path)
   if not fs.exists(path) or fs.isDir(path) then return nil end
   local f=fs.open(path,"r")
@@ -29,8 +29,7 @@ local function install()
   if fs.exists(stage) then fs.delete(stage) end
   fs.makeDir(stage)
   fs.makeDir(backup)
-  local files={
-    ["bin/jpkg.lua"]=[=[
+  local files={    ["bin/jpkg.lua"]=[=[
 local args={...}
 local pkg=assert(loadfile("/juzeppe/system/packages.lua","t",_ENV))()
 local function done(ok,err)
@@ -194,6 +193,1063 @@ shell.setAlias("juznet","/juzeppe/bin/juznet.lua")
 fn()
 
 ]=],
+    ["system-apps/about/main.lua"]=[=[
+return {refresh=false,draw=function(c)
+  local P=c.colors
+  c.text(2,1,"J U Z E P P E  /  OS",P.accent)
+  c.text(2,3,"Sandstone Edition")
+  c.text(2,4,"Version 0.6.2 / API 1")
+  c.text(2,5,"CraftOS / CC: Tweaked")
+  c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
+  c.status("Designed for Juzeppe")
+end}
+
+]=],
+    ["system-apps/about/manifest.json"]=[=[
+{
+  "id": "about",
+  "name": "About",
+  "name_ru": "Об ОС",
+  "description": "System",
+  "description_ru": "Система",
+  "version": "0.6.2",
+  "api": 1,
+  "entry": "main.lua",
+  "order": 8,
+  "icon": [
+    "011110",
+    "100001",
+    "101101",
+    "100001",
+    "101101",
+    "011110"
+  ],
+  "short": "About",
+  "short_ru": "Об ОС",
+  "author": "Juzeppe"
+}
+]=],
+    ["system-apps/clock/main.lua"]=[=[
+local ctx=...
+local P=ctx.colors
+local digits={
+  ["0"]={"111","101","101","101","111"}, ["1"]={"010","110","010","010","111"},
+  ["2"]={"111","001","111","100","111"}, ["3"]={"111","001","111","001","111"},
+  ["4"]={"101","101","111","001","001"}, ["5"]={"111","100","111","001","111"},
+  ["6"]={"111","100","111","101","111"}, ["7"]={"111","001","010","010","010"},
+  ["8"]={"111","101","111","101","111"}, ["9"]={"111","101","111","001","111"},
+  [":"]={"0","1","0","1","0"}
+}
+return {draw=function(c)
+  local mins=math.floor((os.time()%24)*60)
+  local time=string.format("%02d:%02d",math.floor(mins/60),mins%60)
+  local scale=c.width>=35 and 2 or 1
+  local x=math.floor((c.width-17*scale)/2)+1
+  local y=math.max(1,math.floor((c.height-5)/2))
+  for i=1,#time do
+    local rows=digits[time:sub(i,i)]
+    for py,row in ipairs(rows) do
+      for px=1,#row do
+        if row:sub(px,px)=="1" then c.rect(x+(px-1)*scale,y+py-1,scale,1,P.accent) end
+      end
+    end
+    x=x+(#rows[1]+1)*scale
+  end
+  c.status(c.tr("WORLD TIME").." / "..c.tr("DAY").." "..os.day())
+end}
+]=],
+    ["system-apps/clock/manifest.json"]=[=[
+{
+  "id": "clock",
+  "name": "Clock",
+  "name_ru": "Часы",
+  "description": "Time",
+  "description_ru": "Время",
+  "version": "0.6.1",
+  "api": 1,
+  "entry": "main.lua",
+  "order": 6,
+  "icon": [
+    "011110",
+    "100001",
+    "101001",
+    "101101",
+    "100001",
+    "011110"
+  ],
+  "short": "Clock",
+  "short_ru": "Часы",
+  "author": "Juzeppe"
+}]=],
+    ["system-apps/files/main.lua"]=[=[
+local ctx=...
+local P=ctx.colors
+local desktop=assert(loadfile("/juzeppe/system/desktop.lua","t",_ENV))()
+local ops=assert(loadfile("/juzeppe/system/fileops.lua","t",_ENV))()
+local cb=ctx.clipboard
+local path=ops.path(ctx.args.path or ctx.desktopPath or "/")
+local back,forward={},{}
+local scroll,query,sortMode,descending=0,"","name",false
+local selected,anchor={},nil
+local rows={}
+local trashMode=ctx.args.trash==true
+local notice,lastClick,lastTime="",nil,0
+local listTop=5
+local function fold(value)
+  return (value:lower():gsub("[\208\209][\128-\191]",function(ch)
+    local cp=utf8.codepoint(ch)
+    if cp>=1040 and cp<=1071 then return utf8.char(cp+32) end
+    if cp==1025 then return utf8.char(1105) end
+    return ch
+  end))
+end
+local function reset()
+  scroll=0; selected={}; anchor=nil; lastClick=nil; notice=""
+end
+local function change(where,record)
+  where=ops.path(where)
+  if not fs.exists(where) or not fs.isDir(where) then notice="Folder not found"; return end
+  if record and (where~=path or trashMode) then back[#back+1]=path; forward={} end
+  path=where; trashMode=false; query=""; reset()
+end
+local function goBack()
+  if trashMode then trashMode=false; reset(); return end
+  local where=table.remove(back)
+  if where then forward[#forward+1]=path; change(where,false) end
+end
+local function goForward()
+  local where=table.remove(forward)
+  if where then back[#back+1]=path; change(where,false) end
+end
+local function create(c,isDir)
+  if trashMode then return end
+  c.prompt(isDir and "Folder name" or "File name",isDir and c.tr("New folder") or "untitled.txt",function(name)
+    local result,err=desktop.make(path,name,isDir)
+    notice=result and (isDir and "Folder created" or "File created") or err
+    if result then selected={[ops.path(result)]=true}; c.refreshDesktop() end
+    c.invalidate()
+  end)
+end
+local function address(c)
+  c.prompt("Address",path,function(value)
+    local p=value:sub(1,1)=="/" and value or fs.combine(path,value)
+    change(p,true)
+  end)
+end
+local function find(c)
+  c.prompt("Search this folder",query,function(value) query=fold(value); reset() end)
+end
+local function selectedRows()
+  local result={}
+  for _,item in ipairs(rows) do if selected[item.key] then result[#result+1]=item end end
+  return result
+end
+local function one()
+  local list=selectedRows()
+  return #list==1 and list[1] or nil
+end
+local function open(c,item)
+  if not item then return end
+  if trashMode then return end
+  if item.dir then change(item.path,true)
+  elseif item.name:lower():match("%.juz$") then
+    c.confirm("Install this package?",function()
+      local m,err=c.package.installFile(item.path)
+      notice=m and (c.tr("Installed").." "..m.name) or err
+      c.refreshApps()
+    end)
+  elseif fs.isReadOnly(item.path) then notice="Read-only file"
+  else c.launch("/rom/programs/edit.lua",item.path) end
+end
+local function clipboard(mode)
+  if trashMode then return end
+  local paths={}
+  for _,item in ipairs(selectedRows()) do paths[#paths+1]=item.path end
+  local n,err=cb:setFiles(paths,mode)
+  notice=n and (tostring(n).." "..ctx.tr(mode=="copy" and "Copied" or "Cut")) or err
+end
+local function paste(c)
+  if trashMode then return end
+  local result,errors=cb:paste(path)
+  selected={}
+  for _,p in ipairs(result) do selected[p]=true end
+  notice=#result>0 and (#result.." "..c.tr("Pasted")) or (errors[1] or "Clipboard has no files")
+  if #result>0 and #errors>0 then notice=notice.." / "..#errors.." "..c.tr("Failed") end
+  c.refreshDesktop()
+end
+local function rename(c)
+  local item=one()
+  if not item or trashMode then notice="Select one item"; return end
+  c.prompt("New name",item.name,function(name)
+    local result,err=ops.rename(item.path,name)
+    notice=result and "Renamed" or err
+    if result then selected={[result]=true}; c.refreshDesktop() end
+  end)
+end
+local function trash(c)
+  local list=selectedRows()
+  if #list==0 then notice="Select files first"; return end
+  c.confirm(trashMode and "Delete permanently?" or "Move to Trash?",function()
+    local success,errors=0,{}
+    for _,item in ipairs(list) do
+      local ok,err
+      if trashMode then ok,err=ops.destroy(item.id) else ok,err=ops.trash(item.path) end
+      if ok then selected[item.key]=nil; success=success+1 else errors[#errors+1]=err end
+    end
+    notice=success>0 and (success.." "..c.tr(trashMode and "Deleted" or "Moved to Trash")) or errors[1]
+    if success>0 and #errors>0 then notice=notice.." / "..#errors.." "..c.tr("Failed") end
+    c.refreshDesktop()
+  end)
+end
+local function restore(c)
+  local list=selectedRows()
+  if #list==0 then notice="Select files first"; return end
+  local success,errors=0,{}
+  for _,item in ipairs(list) do
+    local result,err=ops.restore(item.id)
+    if result then selected[item.key]=nil; success=success+1 else errors[#errors+1]=err end
+  end
+  notice=success>0 and (success.." "..c.tr("Restored")) or errors[1]
+  c.refreshDesktop()
+end
+local function menu(c,x,y,item)
+  local entries={}
+  local function add(label,action) entries[#entries+1]={label=label,action=action} end
+  if trashMode then
+    add("Restore",function() restore(c) end)
+    add("Delete permanently",function() trash(c) end)
+  else
+    if item then
+      add("Open",function() open(c,item) end)
+      if not item.dir then
+        add("Send over network",function() c.openApp("network",{file=item.path}) end)
+      end
+      add("Copy",function() clipboard("copy") end)
+      add("Cut",function() clipboard("cut") end)
+      add("Rename",function() rename(c) end)
+      add("Move to Trash",function() trash(c) end)
+    end
+    add("Paste",function() paste(c) end)
+    add("New folder",function() create(c,true) end)
+    add("New file",function() create(c,false) end)
+    add("Sort by name",function() descending=sortMode=="name" and not descending or false; sortMode="name" end)
+    add("Sort by size",function() descending=sortMode=="size" and not descending or false; sortMode="size" end)
+    add("Sort by type",function() descending=sortMode=="type" and not descending or false; sortMode="type" end)
+  end
+  c.menu(entries,x,y)
+end
+local function refreshRows()
+  rows={}
+  if trashMode then
+    for _,item in ipairs(ops.trashList()) do
+      item.key=item.id
+      rows[#rows+1]=item
+    end
+    return
+  end
+  if not fs.exists(path) or not fs.isDir(path) then path=ctx.desktopPath or "/"; reset() end
+  for _,name in ipairs(fs.list(path)) do
+    if query=="" or fold(name):find(query,1,true) then
+      local p=ops.path(fs.combine(path,name))
+      local dir=fs.isDir(p)
+      local ext=dir and "" or (name:match("%.([^%.]+)$") or ""):lower()
+      rows[#rows+1]={name=name,path=p,key=p,dir=dir,size=dir and 0 or fs.getSize(p),ext=ext}
+    end
+  end
+  table.sort(rows,function(a,b)
+    if a.dir~=b.dir then return a.dir end
+    local av,bv
+    if sortMode=="size" then av,bv=a.size,b.size
+    elseif sortMode=="type" then av,bv=a.ext,b.ext
+    else av,bv=a.name:lower(),b.name:lower() end
+    if av==bv then av,bv=a.name:lower(),b.name:lower() end
+    if av==bv then av,bv=a.name,b.name end
+    if descending then return av>bv else return av<bv end
+  end)
+  local known={}
+  for _,item in ipairs(rows) do known[item.key]=true end
+  for key in pairs(selected) do if not known[key] then selected[key]=nil end end
+end
+local function sizeLabel(n)
+  if n>=1024*1024 then return string.format("%.1fM",n/1048576)
+  elseif n>=1024 then return string.format("%.1fK",n/1024)
+  else return tostring(n).."B" end
+end
+local function draw(c)
+  refreshRows()
+  c.button(1,1," < ",goBack,P.tint,P.ink)
+  c.button(4,1," > ",goForward,P.tint,P.ink)
+  c.button(7,1," ^ ",function() if trashMode then goBack() else change(fs.getDir(path),true) end end,P.tint,P.ink)
+  c.button(10,1," Desk ",function() change(c.desktopPath,true) end,P.tint,P.ink)
+  c.button(16,1," Bin ",function() trashMode=true; query=""; reset() end,P.tint,P.ink)
+  c.rect(1,2,c.width,1,P.tint)
+  local addressText=trashMode and c.tr("Trash") or path
+  if query~="" then addressText=addressText.." ["..query.."]" end
+  c.raw(1,2,addressText,P.ink,P.tint)
+  c.hit(1,2,math.max(1,c.width-7),1,function() address(c) end)
+  if not trashMode then c.button(c.width-6,2," Find ",function() find(c) end,P.deep,P.paper) end
+  if trashMode then
+    c.button(1,3," Restore ",function() restore(c) end,P.accent,P.paper)
+    c.button(11,3," Delete ",function() trash(c) end,P.danger,P.paper)
+  elseif c.width>=32 then
+    c.button(1,3," New ",function() menu(c,1,3) end,P.accent,P.paper)
+    c.button(7,3," Copy ",function() clipboard("copy") end,P.tint,P.ink)
+    c.button(14,3," Cut ",function() clipboard("cut") end,P.tint,P.ink)
+    c.button(20,3," Paste ",function() paste(c) end,P.tint,P.ink)
+    c.button(28,3," ... ",function() menu(c,28,3,one()) end,P.deep,P.paper)
+  else
+    c.button(1,3," + ",function() create(c,true) end,P.accent,P.paper)
+    c.button(5,3," C ",function() clipboard("copy") end,P.tint,P.ink)
+    c.button(9,3," X ",function() clipboard("cut") end,P.tint,P.ink)
+    c.button(13,3," V ",function() paste(c) end,P.tint,P.ink)
+    c.button(17,3," ... ",function() menu(c,17,3,one()) end,P.deep,P.paper)
+  end
+  c.rect(1,4,c.width,1,P.tint)
+  c.text(2,4,"NAME",P.muted,P.tint)
+  local wide=c.width>=31
+  if wide then c.text(c.width-7,4,"SIZE",P.muted,P.tint) end
+  local count=math.max(1,c.height-listTop+1)
+  scroll=math.max(0,math.min(scroll,math.max(0,#rows-count)))
+  for i=1,count do
+    local item=rows[i+scroll]
+    if item then
+      local y=i+listTop-1
+      local bg=selected[item.key] and P.accent or (i%2==0 and P.tint or P.paper)
+      local fg=selected[item.key] and P.paper or P.ink
+      c.rect(1,y,c.width,1,bg)
+      local label=(item.dir and "> " or "- ")..item.name
+      c.raw(2,y,label,fg,bg)
+      if wide then
+        c.rect(c.width-8,y,9,1,bg)
+        local size=item.dir and c.tr("Folder") or sizeLabel(item.size or fs.getSize(item.data))
+        c.raw(c.width-7,y,size,fg,bg)
+      end
+    end
+  end
+  local n=#selectedRows()
+  c.status(notice~="" and notice or (#rows.." "..c.tr("items").." / "..n.." "..c.tr("selected")))
+end
+local function select(index,mods)
+  local item=rows[index]
+  if not item then selected={}; anchor=nil; return nil end
+  if mods.shift and anchor then
+    if not mods.ctrl then selected={} end
+    for i=math.min(anchor,index),math.max(anchor,index) do if rows[i] then selected[rows[i].key]=true end end
+  elseif mods.ctrl then
+    selected[item.key]=not selected[item.key] or nil
+    anchor=index
+  else selected={[item.key]=true}; anchor=index end
+  notice=""
+  return item
+end
+return {draw=draw,
+  dropTarget=function()
+    if not trashMode then return path end
+  end,
+  onFilesReceived=function(c,folder,names,errors)
+    if trashMode or ops.path(folder)~=path then return end
+    if #names>0 then
+      query=""
+      selected={}
+      for _,name in ipairs(names) do selected[ops.path(fs.combine(path,name))]=true end
+      refreshRows()
+      local count=math.max(1,c.height-listTop+1)
+      for i,item in ipairs(rows) do
+        if selected[item.key] then
+          anchor=i
+          if i>scroll+count then scroll=i-count elseif i<=scroll then scroll=i-1 end
+        end
+      end
+      notice=#names.." "..c.tr("Received")
+      if #errors>0 then notice=notice.." / "..#errors.." "..c.tr("Failed") end
+    else notice=errors[1] or "Transfer failed" end
+    c.invalidate()
+  end,
+  events={mouse_scroll=true,mouse_click=true,key=true,key_up=true,term_resize=true},event=function(c,e,a,b,y)
+  local mods=c.modifiers()
+  if e=="mouse_scroll" then scroll=math.max(0,scroll+a)
+  elseif e=="mouse_click" and y and y>=listTop then
+    local index=scroll+y-listTop+1
+    local item=rows[index]
+    if a==2 then
+      if item and not selected[item.key] then select(index,{}) end
+      menu(c,b,y,item)
+    elseif a==1 then
+      item=select(index,mods)
+      if item and not mods.ctrl and not mods.shift then
+        local now=os.clock()
+        if lastClick==item.key and now-lastTime<.55 then lastClick=nil; open(c,item)
+        else lastClick=item.key; lastTime=now end
+      end
+    end
+  elseif e=="key" then
+    if mods.ctrl and a==keys.c then clipboard("copy")
+    elseif mods.ctrl and a==keys.x then clipboard("cut")
+    elseif mods.ctrl and a==keys.v then paste(c)
+    elseif mods.ctrl and a==keys.a then
+      selected={}; for _,item in ipairs(rows) do selected[item.key]=true end
+    elseif mods.ctrl and a==keys.l then address(c)
+    elseif mods.ctrl and a==keys.f then find(c)
+    elseif mods.ctrl and mods.shift and a==keys.n then create(c,true)
+    elseif a==keys.delete then trash(c)
+    elseif a==keys.f2 then rename(c)
+    elseif a==keys.enter then open(c,one())
+    elseif a==keys.backspace then if trashMode then goBack() else change(fs.getDir(path),true) end
+    elseif a==keys.up or a==keys.down then
+      local delta=a==keys.up and -1 or 1
+      local index=math.max(1,math.min(#rows,(anchor or 0)+delta))
+      select(index,mods)
+      local count=math.max(1,c.height-listTop+1)
+      if index<=scroll then scroll=index-1 elseif index>scroll+count then scroll=index-count end
+    end
+  end
+end}
+]=],
+    ["system-apps/files/manifest.json"]=[=[
+{
+  "id": "files",
+  "name": "Files",
+  "name_ru": "Файлы",
+  "description": "Browse",
+  "description_ru": "Обзор",
+  "version": "0.6.1",
+  "api": 1,
+  "entry": "main.lua",
+  "order": 1,
+  "icon": [
+    "011000",
+    "111100",
+    "111111",
+    "100001",
+    "100001",
+    "111111"
+  ],
+  "short": "Files",
+  "short_ru": "Файлы",
+  "author": "Juzeppe"
+}]=],
+    ["system-apps/network/main.lua"]=[=[
+local c=...
+local P=c.colors
+local net=c.network
+local tab=net:status().enabled and "peers" or "setup"
+local peer,transferKey,shareName,selectedText
+local pendingFile=c.args.file
+local notice=pendingFile and "Select a computer to send file" or ""
+local scroll=0
+local function setTab(name)
+  tab=name; scroll=0; notice=""
+end
+local function report(ok,err,success)
+  notice=ok and (success or "Done") or tostring(err or "Network operation failed")
+  c.invalidate()
+end
+local function withPeer(action)
+  if peer then action(peer); return end
+  c.prompt("Computer ID","",function(value)
+    local id=tonumber(value)
+    if not id or id<0 or id%1~=0 then notice="Invalid computer ID"; return end
+    peer=id
+    action(id)
+  end)
+end
+local function setPeer()
+  c.prompt("Computer ID",peer and tostring(peer) or "",function(value)
+    local id=tonumber(value)
+    if id and id>=0 and id%1==0 then peer=id; scroll=0
+    else notice="Invalid computer ID" end
+  end)
+end
+local function sendMessage()
+  withPeer(function(id)
+    c.prompt("Message","",function(text)
+      local ok,err=net:sendMessage(id,text)
+      report(ok,err,"Message sent")
+      if ok then setTab("chat") end
+    end)
+  end)
+end
+local function sendFile()
+  withPeer(function(id)
+    local candidate=pendingFile
+    if not candidate and c.clipboard:hasFiles() and #c.clipboard.paths==1 then candidate=c.clipboard.paths[1] end
+    c.prompt("File path",candidate or "",function(path)
+      local key,err=net:offerFile(id,path)
+      if key then transferKey=key; pendingFile=nil; setTab("files") end
+      report(key,err,"Offer sent")
+    end)
+  end)
+end
+local function share()
+  withPeer(function(id)
+    local ok,err=net:requestShared(id)
+    if ok then setTab("shares") end
+    report(ok,err,"Request sent")
+  end)
+end
+local function peerName(id)
+  if id then
+    for _,p in ipairs(net:devices()) do if p.id==id then return p.name.." #"..id end end
+    return "#"..id
+  end
+  return c.tr("No computer selected")
+end
+local function tabBar(ui)
+  local broad=ui.width>=29
+  local buttons=broad and {
+    {1," Peers ","peers"},{9," Chat ","chat"},{16," Files ","files"},{24," Setup ","setup"}
+  } or {
+    {1," Net ","peers"},{7," C ","chat"},{11," F ","files"},{15," S ","setup"}
+  }
+  for _,b in ipairs(buttons) do
+    ui.button(b[1],1,b[2],function() setTab(b[3]) end,tab==b[3] and P.accent or P.tint,tab==b[3] and P.paper or P.ink)
+  end
+end
+local function row(ui,y,text,isSelected,action)
+  local bg=isSelected and P.accent or (y%2==0 and P.tint or P.paper)
+  local fg=isSelected and P.paper or P.ink
+  ui.rect(1,y,ui.width,1,bg)
+  ui.raw(1,y,text,fg,bg)
+  if action then ui.hit(1,y,ui.width,1,action) end
+end
+local function peers(ui)
+  local s=net:status()
+  ui.raw(1,2,s.name.." #"..s.id.."  "..s.modems.." "..ui.tr("modems"),P.muted)
+  local list=net:devices()
+  local count=math.max(1,ui.height-4)
+  scroll=math.max(0,math.min(scroll,math.max(0,#list-count)))
+  for i=1,count do
+    local p=list[i+scroll]
+    if p then
+      local label=(p.online and "+ " or "- ")..p.name.." #"..p.id..(p.hub and " [H]" or "")
+      row(ui,i+2,label,peer==p.id,function() peer=p.id end)
+    end
+  end
+  if #list==0 then ui.text(1,3,s.enabled and "No computers discovered" or "Network disabled",P.muted) end
+  ui.raw(1,ui.height-1,peerName(peer),P.muted)
+  ui.button(1,ui.height," ID ",setPeer,P.tint,P.ink)
+  ui.button(6,ui.height," Msg ",sendMessage)
+  ui.button(12,ui.height," File ",sendFile)
+  ui.button(19,ui.height," Share ",share,P.deep,P.paper)
+end
+local function splitText(text,max)
+  local ok,pos=pcall(utf8.offset,text,max+1)
+  if ok and not pos then return text,"" end
+  if ok and pos then return text:sub(1,pos-1),text:sub(pos) end
+  return text:sub(1,max),text:sub(max+1)
+end
+local function copyMessage()
+  if selectedText then c.clipboard:setText(selectedText); notice="Copied"; c.invalidate()
+  else notice="Select a message" end
+end
+local function chat(ui)
+  ui.raw(1,2,peerName(peer),P.muted)
+  local messages=peer and net:messages(peer) or {}
+  local lines={}
+  for _,m in ipairs(messages) do
+    local prefix=m.direction=="out" and c.tr("Me") or m.name
+    local text=prefix..": "..m.text
+    -- Keep messages readable on narrow terminal windows.
+    for piece in (text.."\n"):gmatch("(.-)\n") do
+      repeat
+        local first,rest=splitText(piece,ui.width)
+        lines[#lines+1]={value=first,out=m.direction=="out",text=m.text}
+        piece=rest
+      until piece==""
+    end
+    if m.direction=="out" then lines[#lines+1]={value="  ["..c.tr(m.state).."]",muted=true} end
+  end
+  local count=math.max(1,ui.height-3)
+  scroll=math.max(0,math.min(scroll,math.max(0,#lines-count)))
+  local first=math.max(1,#lines-count+1-scroll)
+  for n=1,count do
+    local entry=lines[first+n-1]
+    if entry then
+      local selected=entry.text and entry.text==selectedText
+      if selected then ui.rect(1,2+n,ui.width,1,P.tint) end
+      ui.raw(1,2+n,entry.value,entry.muted and P.muted or (entry.out and P.deep or P.ink),selected and P.tint or P.paper)
+      if entry.text then ui.hit(1,2+n,ui.width,1,function() selectedText=entry.text end) end
+    end
+  end
+  if #messages==0 then ui.text(1,3,"No messages",P.muted) end
+  ui.button(1,ui.height," Write ",sendMessage)
+  ui.button(10,ui.height," ID ",setPeer,P.tint,P.ink)
+  ui.button(15,ui.height," Copy ",copyMessage,P.tint,P.ink)
+end
+local function files(ui)
+  local list=net:transfersList()
+  local count=math.max(1,ui.height-4)
+  scroll=math.max(0,math.min(scroll,math.max(0,#list-count)))
+  local selected
+  for _,t in ipairs(list) do if t.key==transferKey then selected=t end end
+  if not selected and list[1] then transferKey=list[1].key; selected=list[1] end
+  ui.text(1,2,"TRANSFERS",P.muted)
+  for i=1,count do
+    local t=list[i+scroll]
+    if t then
+      local mark=t.direction=="in" and "< " or "> "
+      row(ui,i+2,mark..t.name,transferKey==t.key,function() transferKey=t.key end)
+    end
+  end
+  if not selected then ui.text(1,3,"No transfers",P.muted) end
+  if selected then
+    local progress=selected.size==0 and (selected.state=="Received" and 100 or 0) or math.floor(selected.bytes*100/selected.size)
+    ui.raw(1,ui.height-1,c.tr(selected.state).." "..progress.."% #"..selected.peer,P.muted)
+    if selected.direction=="in" and selected.state=="Pending" then
+      ui.button(1,ui.height," Accept ",function() report(net:accept(selected.key)) end)
+      ui.button(11,ui.height," Decline ",function() report(net:decline(selected.key)) end,P.danger,P.paper)
+    elseif selected.state=="Sending" or selected.state=="Receiving" or selected.state=="Offered" then
+      ui.button(1,ui.height," Cancel ",function() report(net:cancel(selected.key)) end,P.danger,P.paper)
+      ui.button(11,ui.height," File ",sendFile)
+    else
+      ui.button(1,ui.height," Open ",function()
+        local path=net:status().receivedPath
+        if not fs.exists(path) then fs.makeDir(path) end
+        ui.openApp("files",{path=path})
+      end,P.tint,P.ink)
+      ui.button(9,ui.height," File ",sendFile)
+    end
+  else ui.button(1,ui.height," File ",sendFile) end
+end
+local function shares(ui)
+  local items=peer and net:sharedFiles(peer) or {}
+  ui.raw(1,2,peerName(peer),P.muted)
+  local count=math.max(1,ui.height-3)
+  scroll=math.max(0,math.min(scroll,math.max(0,#items-count)))
+  for i=1,count do
+    local item=items[i+scroll]
+    if item then row(ui,i+2,item.name.."  "..item.size.."B",shareName==item.name,function() shareName=item.name end) end
+  end
+  if #items==0 then ui.text(1,3,"No shared files",P.muted) end
+  ui.button(1,ui.height," Get ",function()
+    if peer and shareName then report(net:requestSharedFile(peer,shareName))
+    else notice="Select files first" end
+  end)
+  ui.button(8,ui.height," Refresh ",share,P.tint,P.ink)
+end
+local function setup(ui)
+  local s=net:status()
+  ui.button(1,2," Name ",function()
+    ui.prompt("Computer name",s.name,function(v) report(net:configure({name=v})) end)
+  end,P.tint,P.ink)
+  ui.raw(9,2,s.name.." #"..s.id)
+  ui.button(1,3," Key ",function()
+    ui.prompt("Network key (8+ bytes)","",function(v) report(net:configure({key=v})) end,true)
+  end,P.tint,P.ink)
+  ui.text(9,3,s.hasKey and "Key configured" or "No network key",P.muted)
+  ui.button(1,4,s.enabled and " Disable " or " Enable ",function() report(net:configure({enabled=not s.enabled})) end,P.accent,P.paper)
+  ui.raw(12,4,s.modems.." "..ui.tr("modems"),P.muted)
+  ui.button(1,5," Hub ",function() report(net:configure({hub=not s.hub})) end,P.tint,P.ink)
+  ui.text(9,5,s.hub and "Server mode on" or "Server mode off",P.muted)
+  ui.button(1,6," Server ID ",function()
+    ui.prompt("Server ID (blank = direct)",s.hubID>=0 and tostring(s.hubID) or "",function(v)
+      local id=v=="" and -1 or tonumber(v)
+      if not id then notice="Invalid computer ID"; return end
+      report(net:configure({hubID=id}))
+    end)
+  end,P.tint,P.ink)
+  ui.raw(13,6,s.hubID>=0 and "#"..s.hubID or c.tr("Direct"),P.muted)
+  ui.button(1,7," Shared ",function()
+    local path=net:status().sharedPath
+    if not fs.exists(path) then fs.makeDir(path) end
+    ui.openApp("files",{path=path})
+  end,P.tint,P.ink)
+  if ui.width>=31 then ui.raw(11,7,c.tr("Mailbox")..": "..s.mailbox,P.muted) end
+end
+return {draw=function(ui)
+  tabBar(ui)
+  if tab=="peers" then peers(ui)
+  elseif tab=="chat" then chat(ui)
+  elseif tab=="files" then files(ui)
+  elseif tab=="shares" then shares(ui)
+  else setup(ui) end
+  ui.status(notice)
+end,events={mouse_scroll=true,key=true},event=function(ui,e,a)
+  if e=="mouse_scroll" then scroll=math.max(0,scroll+(tab=="chat" and -a or a))
+  elseif e=="key" and a==keys.escape then setTab("peers")
+  elseif e=="key" and tab=="chat" and a==keys.c and ui.modifiers().ctrl then copyMessage() end
+end}
+]=],
+    ["system-apps/network/manifest.json"]=[=[
+{
+  "id": "network",
+  "name": "Network",
+  "name_ru": "Сеть",
+  "description": "Local network and city server",
+  "description_ru": "Общение и передача файлов",
+  "version": "0.6.1",
+  "api": 1,
+  "entry": "main.lua",
+  "order": 7,
+  "icon": [
+    "011110",
+    "010010",
+    "111111",
+    "001100",
+    "111111",
+    "100001"
+  ],
+  "short": "Net",
+  "short_ru": "Сеть",
+  "author": "Juzeppe"
+}]=],
+    ["system-apps/notes/main.lua"]=[=[
+local ctx=...
+local P=ctx.colors
+local file=ctx.dataPath.."/notes.txt"
+if not fs.exists(file) and fs.exists("/.juzeppe/notes.txt") then fs.copy("/.juzeppe/notes.txt",file) end
+return {draw=function(c)
+  c.text(2,1,"Personal notebook")
+  c.button(2,2," Edit note ",function() c.launch("/rom/programs/edit.lua",file) end)
+  local text=c.read(file)
+  if not text or text=="" then c.text(2,4,"Your notebook is empty.")
+  else
+    local y=4
+    for row in (text.."\n"):gmatch("(.-)\n") do
+      repeat
+        if y>c.height then break end
+        c.raw(2,y,row:sub(1,c.width-3))
+        row=row:sub(c.width-2)
+        y=y+1
+      until row==""
+      if y>c.height then break end
+    end
+  end
+  c.status("Saved locally")
+end}
+]=],
+    ["system-apps/notes/manifest.json"]=[=[
+{
+  "id": "notes",
+  "name": "Notes",
+  "name_ru": "Заметки",
+  "description": "Notebook",
+  "description_ru": "Блокнот",
+  "version": "0.6.1",
+  "api": 1,
+  "entry": "main.lua",
+  "order": 2,
+  "icon": [
+    "111100",
+    "100110",
+    "101011",
+    "100001",
+    "101101",
+    "111111"
+  ],
+  "short": "Notes",
+  "short_ru": "Заметки",
+  "author": "Juzeppe"
+}]=],
+    ["system-apps/packages/main.lua"]=[=[
+local ctx=...
+local P=ctx.colors
+local pkg=ctx.package
+local tab="catalog"
+local list,visible={},{}
+local scroll,selected=0,1
+local query,loading="",false
+
+local function tr(en,ru)
+  return ctx.getLanguage()=="en" and en or ru
+end
+
+local function filtered()
+  visible={}
+  for _,item in ipairs(list) do
+    local name=ctx.getLanguage()=="en" and item.name or (item.name_ru or item.name)
+    local detail=ctx.getLanguage()=="en" and (item.description or "") or (item.description_ru or item.description or "")
+    local text=(item.id.." "..item.name.." "..(item.name_ru or "").." "..detail):lower()
+    if query=="" or text:find(query:lower(),1,true) then visible[#visible+1]=item end
+  end
+  selected=math.max(1,math.min(selected,#visible))
+  scroll=math.max(0,math.min(scroll,math.max(0,#visible-5)))
+end
+
+local function useList(result,err)
+  if result then list=result; filtered()
+  else loading=false; ctx.status(err) end
+end
+
+local function reload(remote)
+  if tab=="installed" then loading=false; useList(pkg.installed()); return end
+  if remote and pkg.repository()~="" then
+    if loading then return end
+    loading=true
+    ctx.status(tr("Connecting to Juzeppe Store...","Подключаем магазин Juzeppe..."))
+    ctx.job(function() return pkg.catalog(true) end,function(result,err)
+      loading=false
+      if tab=="catalog" then
+        useList(result,err)
+        if result then ctx.status(tr("Store updated","Магазин обновлён")) end
+      end
+    end)
+  else loading=false; useList(pkg.catalog(false)) end
+end
+
+local function switch(nextTab)
+  tab=nextTab
+  scroll,selected=0,1
+  reload(nextTab=="catalog")
+end
+
+local function button(x,y,label,width,fn,active)
+  local bg=active and P.accent or P.deep
+  local fg=active and P.paper or P.paper
+  ctx.rect(x,y,width,1,bg)
+  ctx.raw(x,y,label,fg,bg)
+  ctx.hit(x,y,width,1,fn)
+end
+
+local function installFile()
+  ctx.prompt(tr("Path to .juz file","Путь к файлу .juz"),"/",function(path)
+    local app,err=pkg.installFile(path)
+    ctx.status(app and (tr("Installed ","Установлено ")..app.name) or err)
+    ctx.refreshApps()
+    reload(false)
+  end)
+end
+
+local function repository()
+  ctx.prompt(tr("Repository URL (empty = default)","Адрес репозитория (пусто = основной)"),pkg.repository(),function(url)
+    if url=="" then
+      url="https://raw.githubusercontent.com/gosuparenek/juzeppe-repo/main"
+    end
+    local ok,err=pkg.setRepository(url)
+    if not ok then ctx.status(err); return end
+    ctx.status(tr("Repository saved","Репозиторий сохранён"))
+    if tab=="catalog" then reload(true) end
+  end)
+end
+
+local function action()
+  if loading or ctx.busy then return end
+  local item=visible[selected]
+  if not item then return end
+  if tab=="catalog" then
+    ctx.confirm(tr("Install this application?","Установить приложение?"),function()
+      loading=true
+      ctx.status(tr("Downloading application...","Скачиваем приложение..."))
+      ctx.job(function() return pkg.installCatalog(item) end,function(app,err)
+        loading=false
+        ctx.status(app and (tr("Installed ","Установлено ")..app.name) or err)
+        ctx.refreshApps()
+        reload(false)
+      end)
+    end)
+  else
+    if item.system then ctx.status(tr("System application","Системное приложение")); return end
+    ctx.confirm(tr("Remove this application?","Удалить приложение?"),function()
+      local ok,err=pkg.remove(item.id)
+      ctx.status(ok and tr("Application removed","Приложение удалено") or err)
+      ctx.refreshApps()
+      reload(false)
+    end)
+  end
+end
+
+local function search()
+  ctx.prompt(tr("Find an application","Найти приложение"),query,function(value)
+    query=value:lower()
+    scroll,selected=0,1
+    filtered()
+  end)
+end
+
+local function drawIcon(item,x,y)
+  local icon=item.icon
+  if type(icon)~="table" or #icon~=6 then
+    ctx.rect(x,y,3,2,P.oasis)
+    ctx.raw(x,y,"APP",P.paper,P.oasis)
+    return
+  end
+  for py=1,2 do
+    for px=1,3 do
+      local bit=icon[(py-1)*3+1]:sub((px-1)*2+1,(px-1)*2+1)
+      local colour=bit=="1" and P.oasis or P.tint
+      ctx.rect(x+px-1,y+py-1,1,1,colour)
+    end
+  end
+end
+
+local function draw(c)
+  local w,h=c.width,c.height
+  if w<22 or h<10 then c.text(1,1,"Resize window"); return end
+
+  c.rect(1,1,w,1,P.deep)
+  c.raw(2,1,"J U Z E P P E   /   STORE",P.paper,P.deep)
+  c.button(w-8,1," Sync ",function() reload(true) end,P.accent,P.paper)
+
+  button(1,2,tr(" Catalog "," Каталог "),9,function() switch("catalog") end,tab=="catalog")
+  button(11,2,tr(" Installed "," Установлено "),math.min(13,w-10),function() switch("installed") end,tab=="installed")
+  c.button(w-8,2," Repo ",repository,P.tint,P.ink)
+
+  c.rect(1,3,w,1,P.tint)
+  c.button(1,3,tr(" Search "," Поиск "),search,P.deep,P.paper)
+  local queryText=query=="" and tr("All applications","Все приложения") or query
+  c.raw(11,3,queryText,P.muted,P.tint)
+
+  local count=math.max(1,math.floor((h-7)/2))
+  scroll=math.max(0,math.min(scroll,math.max(0,#visible-count)))
+  for slot=1,count do
+    local index=scroll+slot
+    local item=visible[index]
+    local y=4+(slot-1)*2
+    local selectedRow=index==selected
+    local bg=selectedRow and P.tint or P.paper
+    if item then
+      c.rect(1,y,w,2,bg)
+      drawIcon(item,2,y)
+      local name=ctx.getLanguage()=="en" and item.name or (item.name_ru or item.name)
+      c.raw(7,y,name,P.ink,bg)
+      local installed=pkg.find(item.id)
+      local state=installed and (pkg.newer(item.version,installed.version) and tr("Update available","Доступно обновление") or tr("Installed","Установлено")) or item.version
+      c.raw(7,y+1,state,installed and P.foliage or P.muted,bg)
+      c.hit(1,y,w,2,function() selected=index end)
+    elseif loading and slot==1 then
+      c.raw(2,y,tr("Connecting to the store...","Подключаемся к магазину..."),P.muted,bg)
+    end
+  end
+
+  c.rect(1,h-3,w,1,P.tint)
+  local item=visible[selected]
+  if item then
+    local name=ctx.getLanguage()=="en" and item.name or (item.name_ru or item.name)
+    local description=ctx.getLanguage()=="en" and (item.description or "") or (item.description_ru or item.description or "")
+    c.raw(2,h-3,name,P.deep,P.tint)
+    c.raw(2,h-2,description,P.muted)
+    if loading or ctx.busy then c.raw(2,h,tr("Please wait...","Подождите..."),P.muted,P.paper)
+    elseif tab=="catalog" then
+      local installed=pkg.find(item.id)
+      local canInstall=not installed or pkg.newer(item.version,installed.version)
+      if canInstall then
+        c.button(2,h,installed and tr(" Update "," Обновить ") or tr(" Install "," Установить "),action,P.accent,P.paper)
+      else c.raw(2,h,tr("Already installed","Уже установлено"),P.foliage) end
+    elseif not item.system then c.button(2,h,tr(" Remove "," Удалить "),action,P.danger,P.paper)
+    else c.raw(2,h,tr("System application","Системное приложение"),P.muted) end
+  elseif not loading then
+    c.raw(2,h-2,query~="" and tr("No matches","Ничего не найдено") or tr("Store is empty","Каталог пуст"),P.muted)
+  end
+end
+
+reload(false)
+if pkg.repository()~="" then reload(true) end
+
+return {draw=draw,events={mouse_scroll=true,key=true,term_resize=true},event=function(c,e,a)
+  local count=math.max(1,math.floor((c.height-7)/2))
+  if e=="mouse_scroll" then
+    scroll=math.max(0,math.min(math.max(0,#visible-count),scroll+a))
+  elseif e=="key" and (a==keys.up or a==keys.down) then
+    selected=math.max(1,math.min(#visible,selected+(a==keys.up and -1 or 1)))
+    if selected<=scroll then scroll=selected-1 elseif selected>scroll+count then scroll=selected-count end
+  elseif e=="key" and a==keys.enter then action()
+  elseif e=="key" and a==keys.f and ctx.modifiers().ctrl then search() end
+end}
+]=],
+    ["system-apps/packages/manifest.json"]=[=[
+{
+  "id": "packages",
+  "name": "Apps",
+  "name_ru": "Магазин",
+  "description": "Packages",
+  "description_ru": "Пакеты",
+  "version": "0.6.2",
+  "api": 1,
+  "entry": "main.lua",
+  "order": 5,
+  "icon": [
+    "111111",
+    "100001",
+    "110011",
+    "101101",
+    "100001",
+    "111111"
+  ],
+  "short": "Apps",
+  "short_ru": "Магазин",
+  "author": "Juzeppe"
+}
+]=],
+    ["system-apps/settings/main.lua"]=[=[
+local ctx=...
+local P=ctx.colors
+return {refresh=false,draw=function(c)
+  c.text(1,1,"Language")
+  local language=c.getLanguage()
+  c.button(1,2," EN ",function() c.setLanguage("en") end,language=="en" and P.accent or P.tint,language=="en" and P.paper or P.ink)
+  c.button(6,2," RU ",function() c.setLanguage("ru") end,language=="ru" and P.accent or P.tint,language=="ru" and P.paper or P.ink)
+  c.button(11,2," RU-Lat ",function() c.setLanguage("translit") end,language=="translit" and P.accent or P.tint,language=="translit" and P.paper or P.ink)
+  c.text(1,3,"RU needs Cyrillic font",P.muted)
+  local i,themes=c.getTheme()
+  for n,t in ipairs(themes) do
+    local y=3+n
+    local bg=i==n and P.tint or P.paper
+    c.rect(1,y,c.width,1,bg)
+    c.raw(1,y,(i==n and "* " or "  ")..c.tr(t.name),P.ink,bg)
+    c.hit(1,y,c.width,1,function() c.setTheme(n) end)
+  end
+  c.status("Settings saved")
+end}
+]=],
+    ["system-apps/settings/manifest.json"]=[=[
+{
+  "id": "settings",
+  "name": "Settings",
+  "name_ru": "Настройки",
+  "description": "Themes",
+  "description_ru": "Темы",
+  "version": "0.6.1",
+  "api": 1,
+  "entry": "main.lua",
+  "order": 4,
+  "icon": [
+    "001100",
+    "011110",
+    "110011",
+    "110011",
+    "011110",
+    "001100"
+  ],
+  "short": "Prefs",
+  "short_ru": "Настр.",
+  "author": "Juzeppe"
+}]=],
+    ["system-apps/terminal/main.lua"]=[=[
+local started=false
+return {refresh=false,draw=function(c)
+  if not started then
+    started=true
+    c.status("Type exit to return")
+    c.launch()
+  else
+    c.text(2,2,"Shell session ended")
+    c.button(2,4," Start shell ",function() c.launch() end)
+  end
+end,onReturn=function(c) c.status("Shell session ended") end}
+]=],
+    ["system-apps/terminal/manifest.json"]=[=[
+{
+  "id": "terminal",
+  "name": "Terminal",
+  "name_ru": "Терминал",
+  "description": "Commands",
+  "description_ru": "Команды",
+  "version": "0.6.1",
+  "api": 1,
+  "entry": "main.lua",
+  "order": 3,
+  "icon": [
+    "111111",
+    "100001",
+    "110001",
+    "101101",
+    "100001",
+    "111111"
+  ],
+  "short": "Shell",
+  "short_ru": "Shell",
+  "author": "Juzeppe"
+}]=],
     ["system/art.lua"]=[=[
 return function(line,P)
 local function mosaicCell(x, y, pixels, fg, bg)
@@ -2438,6 +3494,7 @@ local apps=M.root.."/apps"
 local system=M.root.."/system-apps"
 local stage=M.root.."/.install"
 local config=M.root.."/config/repository"
+local defaultRepository="https://raw.githubusercontent.com/gosuparenek/juzeppe-repo/main"
 local function idOK(s)
   return type(s)=="string" and #s<=40 and s:match("^[a-z][a-z0-9_-]*$")~=nil
 end
@@ -2583,12 +3640,15 @@ function M.remove(id)
   return true
 end
 function M.repository()
-  return U.read(config) or ""
+  local saved=U.read(config)
+  if not saved or saved=="" then return defaultRepository end
+  if saved=="local" then return "" end
+  return saved
 end
 function M.setRepository(url)
   url=url:gsub("/+$","")
   if url~="" and not url:match("^https?://[^%s]+$") then return nil,"Use an http(s) URL" end
-  return U.write(config,url)
+  return U.write(config,url=="" and "local" or url)
 end
 local function get(url)
   if not http or not http.get then return nil,"HTTP is disabled" end
@@ -3480,974 +4540,6 @@ return M
 
 
 ]=],
-    ["system-apps/about/main.lua"]=[=[
-return {refresh=false,draw=function(c)
-  local P=c.colors
-  c.text(2,1,"J U Z E P P E  /  OS",P.accent)
-  c.text(2,3,"Sandstone Edition")
-  c.text(2,4,"Version 0.6.1 / API 1")
-  c.text(2,5,"CraftOS / CC: Tweaked")
-  c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
-  c.status("Designed for Juzeppe")
-end}
-
-]=],
-    ["system-apps/about/manifest.json"]=[=[
-{
-  "id": "about",
-  "name": "About",
-  "name_ru": "Об ОС",
-  "description": "System",
-  "description_ru": "Система",
-  "version": "0.6.1",
-  "api": 1,
-  "entry": "main.lua",
-  "order": 8,
-  "icon": [
-    "011110",
-    "100001",
-    "101101",
-    "100001",
-    "101101",
-    "011110"
-  ],
-  "short": "About",
-  "short_ru": "Об ОС",
-  "author": "Juzeppe"
-}]=],
-    ["system-apps/clock/main.lua"]=[=[
-local ctx=...
-local P=ctx.colors
-local digits={
-  ["0"]={"111","101","101","101","111"}, ["1"]={"010","110","010","010","111"},
-  ["2"]={"111","001","111","100","111"}, ["3"]={"111","001","111","001","111"},
-  ["4"]={"101","101","111","001","001"}, ["5"]={"111","100","111","001","111"},
-  ["6"]={"111","100","111","101","111"}, ["7"]={"111","001","010","010","010"},
-  ["8"]={"111","101","111","101","111"}, ["9"]={"111","101","111","001","111"},
-  [":"]={"0","1","0","1","0"}
-}
-return {draw=function(c)
-  local mins=math.floor((os.time()%24)*60)
-  local time=string.format("%02d:%02d",math.floor(mins/60),mins%60)
-  local scale=c.width>=35 and 2 or 1
-  local x=math.floor((c.width-17*scale)/2)+1
-  local y=math.max(1,math.floor((c.height-5)/2))
-  for i=1,#time do
-    local rows=digits[time:sub(i,i)]
-    for py,row in ipairs(rows) do
-      for px=1,#row do
-        if row:sub(px,px)=="1" then c.rect(x+(px-1)*scale,y+py-1,scale,1,P.accent) end
-      end
-    end
-    x=x+(#rows[1]+1)*scale
-  end
-  c.status(c.tr("WORLD TIME").." / "..c.tr("DAY").." "..os.day())
-end}
-]=],
-    ["system-apps/clock/manifest.json"]=[=[
-{
-  "id": "clock",
-  "name": "Clock",
-  "name_ru": "Часы",
-  "description": "Time",
-  "description_ru": "Время",
-  "version": "0.6.1",
-  "api": 1,
-  "entry": "main.lua",
-  "order": 6,
-  "icon": [
-    "011110",
-    "100001",
-    "101001",
-    "101101",
-    "100001",
-    "011110"
-  ],
-  "short": "Clock",
-  "short_ru": "Часы",
-  "author": "Juzeppe"
-}]=],
-    ["system-apps/files/main.lua"]=[=[
-local ctx=...
-local P=ctx.colors
-local desktop=assert(loadfile("/juzeppe/system/desktop.lua","t",_ENV))()
-local ops=assert(loadfile("/juzeppe/system/fileops.lua","t",_ENV))()
-local cb=ctx.clipboard
-local path=ops.path(ctx.args.path or ctx.desktopPath or "/")
-local back,forward={},{}
-local scroll,query,sortMode,descending=0,"","name",false
-local selected,anchor={},nil
-local rows={}
-local trashMode=ctx.args.trash==true
-local notice,lastClick,lastTime="",nil,0
-local listTop=5
-local function fold(value)
-  return (value:lower():gsub("[\208\209][\128-\191]",function(ch)
-    local cp=utf8.codepoint(ch)
-    if cp>=1040 and cp<=1071 then return utf8.char(cp+32) end
-    if cp==1025 then return utf8.char(1105) end
-    return ch
-  end))
-end
-local function reset()
-  scroll=0; selected={}; anchor=nil; lastClick=nil; notice=""
-end
-local function change(where,record)
-  where=ops.path(where)
-  if not fs.exists(where) or not fs.isDir(where) then notice="Folder not found"; return end
-  if record and (where~=path or trashMode) then back[#back+1]=path; forward={} end
-  path=where; trashMode=false; query=""; reset()
-end
-local function goBack()
-  if trashMode then trashMode=false; reset(); return end
-  local where=table.remove(back)
-  if where then forward[#forward+1]=path; change(where,false) end
-end
-local function goForward()
-  local where=table.remove(forward)
-  if where then back[#back+1]=path; change(where,false) end
-end
-local function create(c,isDir)
-  if trashMode then return end
-  c.prompt(isDir and "Folder name" or "File name",isDir and c.tr("New folder") or "untitled.txt",function(name)
-    local result,err=desktop.make(path,name,isDir)
-    notice=result and (isDir and "Folder created" or "File created") or err
-    if result then selected={[ops.path(result)]=true}; c.refreshDesktop() end
-    c.invalidate()
-  end)
-end
-local function address(c)
-  c.prompt("Address",path,function(value)
-    local p=value:sub(1,1)=="/" and value or fs.combine(path,value)
-    change(p,true)
-  end)
-end
-local function find(c)
-  c.prompt("Search this folder",query,function(value) query=fold(value); reset() end)
-end
-local function selectedRows()
-  local result={}
-  for _,item in ipairs(rows) do if selected[item.key] then result[#result+1]=item end end
-  return result
-end
-local function one()
-  local list=selectedRows()
-  return #list==1 and list[1] or nil
-end
-local function open(c,item)
-  if not item then return end
-  if trashMode then return end
-  if item.dir then change(item.path,true)
-  elseif item.name:lower():match("%.juz$") then
-    c.confirm("Install this package?",function()
-      local m,err=c.package.installFile(item.path)
-      notice=m and (c.tr("Installed").." "..m.name) or err
-      c.refreshApps()
-    end)
-  elseif fs.isReadOnly(item.path) then notice="Read-only file"
-  else c.launch("/rom/programs/edit.lua",item.path) end
-end
-local function clipboard(mode)
-  if trashMode then return end
-  local paths={}
-  for _,item in ipairs(selectedRows()) do paths[#paths+1]=item.path end
-  local n,err=cb:setFiles(paths,mode)
-  notice=n and (tostring(n).." "..ctx.tr(mode=="copy" and "Copied" or "Cut")) or err
-end
-local function paste(c)
-  if trashMode then return end
-  local result,errors=cb:paste(path)
-  selected={}
-  for _,p in ipairs(result) do selected[p]=true end
-  notice=#result>0 and (#result.." "..c.tr("Pasted")) or (errors[1] or "Clipboard has no files")
-  if #result>0 and #errors>0 then notice=notice.." / "..#errors.." "..c.tr("Failed") end
-  c.refreshDesktop()
-end
-local function rename(c)
-  local item=one()
-  if not item or trashMode then notice="Select one item"; return end
-  c.prompt("New name",item.name,function(name)
-    local result,err=ops.rename(item.path,name)
-    notice=result and "Renamed" or err
-    if result then selected={[result]=true}; c.refreshDesktop() end
-  end)
-end
-local function trash(c)
-  local list=selectedRows()
-  if #list==0 then notice="Select files first"; return end
-  c.confirm(trashMode and "Delete permanently?" or "Move to Trash?",function()
-    local success,errors=0,{}
-    for _,item in ipairs(list) do
-      local ok,err
-      if trashMode then ok,err=ops.destroy(item.id) else ok,err=ops.trash(item.path) end
-      if ok then selected[item.key]=nil; success=success+1 else errors[#errors+1]=err end
-    end
-    notice=success>0 and (success.." "..c.tr(trashMode and "Deleted" or "Moved to Trash")) or errors[1]
-    if success>0 and #errors>0 then notice=notice.." / "..#errors.." "..c.tr("Failed") end
-    c.refreshDesktop()
-  end)
-end
-local function restore(c)
-  local list=selectedRows()
-  if #list==0 then notice="Select files first"; return end
-  local success,errors=0,{}
-  for _,item in ipairs(list) do
-    local result,err=ops.restore(item.id)
-    if result then selected[item.key]=nil; success=success+1 else errors[#errors+1]=err end
-  end
-  notice=success>0 and (success.." "..c.tr("Restored")) or errors[1]
-  c.refreshDesktop()
-end
-local function menu(c,x,y,item)
-  local entries={}
-  local function add(label,action) entries[#entries+1]={label=label,action=action} end
-  if trashMode then
-    add("Restore",function() restore(c) end)
-    add("Delete permanently",function() trash(c) end)
-  else
-    if item then
-      add("Open",function() open(c,item) end)
-      if not item.dir then
-        add("Send over network",function() c.openApp("network",{file=item.path}) end)
-      end
-      add("Copy",function() clipboard("copy") end)
-      add("Cut",function() clipboard("cut") end)
-      add("Rename",function() rename(c) end)
-      add("Move to Trash",function() trash(c) end)
-    end
-    add("Paste",function() paste(c) end)
-    add("New folder",function() create(c,true) end)
-    add("New file",function() create(c,false) end)
-    add("Sort by name",function() descending=sortMode=="name" and not descending or false; sortMode="name" end)
-    add("Sort by size",function() descending=sortMode=="size" and not descending or false; sortMode="size" end)
-    add("Sort by type",function() descending=sortMode=="type" and not descending or false; sortMode="type" end)
-  end
-  c.menu(entries,x,y)
-end
-local function refreshRows()
-  rows={}
-  if trashMode then
-    for _,item in ipairs(ops.trashList()) do
-      item.key=item.id
-      rows[#rows+1]=item
-    end
-    return
-  end
-  if not fs.exists(path) or not fs.isDir(path) then path=ctx.desktopPath or "/"; reset() end
-  for _,name in ipairs(fs.list(path)) do
-    if query=="" or fold(name):find(query,1,true) then
-      local p=ops.path(fs.combine(path,name))
-      local dir=fs.isDir(p)
-      local ext=dir and "" or (name:match("%.([^%.]+)$") or ""):lower()
-      rows[#rows+1]={name=name,path=p,key=p,dir=dir,size=dir and 0 or fs.getSize(p),ext=ext}
-    end
-  end
-  table.sort(rows,function(a,b)
-    if a.dir~=b.dir then return a.dir end
-    local av,bv
-    if sortMode=="size" then av,bv=a.size,b.size
-    elseif sortMode=="type" then av,bv=a.ext,b.ext
-    else av,bv=a.name:lower(),b.name:lower() end
-    if av==bv then av,bv=a.name:lower(),b.name:lower() end
-    if av==bv then av,bv=a.name,b.name end
-    if descending then return av>bv else return av<bv end
-  end)
-  local known={}
-  for _,item in ipairs(rows) do known[item.key]=true end
-  for key in pairs(selected) do if not known[key] then selected[key]=nil end end
-end
-local function sizeLabel(n)
-  if n>=1024*1024 then return string.format("%.1fM",n/1048576)
-  elseif n>=1024 then return string.format("%.1fK",n/1024)
-  else return tostring(n).."B" end
-end
-local function draw(c)
-  refreshRows()
-  c.button(1,1," < ",goBack,P.tint,P.ink)
-  c.button(4,1," > ",goForward,P.tint,P.ink)
-  c.button(7,1," ^ ",function() if trashMode then goBack() else change(fs.getDir(path),true) end end,P.tint,P.ink)
-  c.button(10,1," Desk ",function() change(c.desktopPath,true) end,P.tint,P.ink)
-  c.button(16,1," Bin ",function() trashMode=true; query=""; reset() end,P.tint,P.ink)
-  c.rect(1,2,c.width,1,P.tint)
-  local addressText=trashMode and c.tr("Trash") or path
-  if query~="" then addressText=addressText.." ["..query.."]" end
-  c.raw(1,2,addressText,P.ink,P.tint)
-  c.hit(1,2,math.max(1,c.width-7),1,function() address(c) end)
-  if not trashMode then c.button(c.width-6,2," Find ",function() find(c) end,P.deep,P.paper) end
-  if trashMode then
-    c.button(1,3," Restore ",function() restore(c) end,P.accent,P.paper)
-    c.button(11,3," Delete ",function() trash(c) end,P.danger,P.paper)
-  elseif c.width>=32 then
-    c.button(1,3," New ",function() menu(c,1,3) end,P.accent,P.paper)
-    c.button(7,3," Copy ",function() clipboard("copy") end,P.tint,P.ink)
-    c.button(14,3," Cut ",function() clipboard("cut") end,P.tint,P.ink)
-    c.button(20,3," Paste ",function() paste(c) end,P.tint,P.ink)
-    c.button(28,3," ... ",function() menu(c,28,3,one()) end,P.deep,P.paper)
-  else
-    c.button(1,3," + ",function() create(c,true) end,P.accent,P.paper)
-    c.button(5,3," C ",function() clipboard("copy") end,P.tint,P.ink)
-    c.button(9,3," X ",function() clipboard("cut") end,P.tint,P.ink)
-    c.button(13,3," V ",function() paste(c) end,P.tint,P.ink)
-    c.button(17,3," ... ",function() menu(c,17,3,one()) end,P.deep,P.paper)
-  end
-  c.rect(1,4,c.width,1,P.tint)
-  c.text(2,4,"NAME",P.muted,P.tint)
-  local wide=c.width>=31
-  if wide then c.text(c.width-7,4,"SIZE",P.muted,P.tint) end
-  local count=math.max(1,c.height-listTop+1)
-  scroll=math.max(0,math.min(scroll,math.max(0,#rows-count)))
-  for i=1,count do
-    local item=rows[i+scroll]
-    if item then
-      local y=i+listTop-1
-      local bg=selected[item.key] and P.accent or (i%2==0 and P.tint or P.paper)
-      local fg=selected[item.key] and P.paper or P.ink
-      c.rect(1,y,c.width,1,bg)
-      local label=(item.dir and "> " or "- ")..item.name
-      c.raw(2,y,label,fg,bg)
-      if wide then
-        c.rect(c.width-8,y,9,1,bg)
-        local size=item.dir and c.tr("Folder") or sizeLabel(item.size or fs.getSize(item.data))
-        c.raw(c.width-7,y,size,fg,bg)
-      end
-    end
-  end
-  local n=#selectedRows()
-  c.status(notice~="" and notice or (#rows.." "..c.tr("items").." / "..n.." "..c.tr("selected")))
-end
-local function select(index,mods)
-  local item=rows[index]
-  if not item then selected={}; anchor=nil; return nil end
-  if mods.shift and anchor then
-    if not mods.ctrl then selected={} end
-    for i=math.min(anchor,index),math.max(anchor,index) do if rows[i] then selected[rows[i].key]=true end end
-  elseif mods.ctrl then
-    selected[item.key]=not selected[item.key] or nil
-    anchor=index
-  else selected={[item.key]=true}; anchor=index end
-  notice=""
-  return item
-end
-return {draw=draw,
-  dropTarget=function()
-    if not trashMode then return path end
-  end,
-  onFilesReceived=function(c,folder,names,errors)
-    if trashMode or ops.path(folder)~=path then return end
-    if #names>0 then
-      query=""
-      selected={}
-      for _,name in ipairs(names) do selected[ops.path(fs.combine(path,name))]=true end
-      refreshRows()
-      local count=math.max(1,c.height-listTop+1)
-      for i,item in ipairs(rows) do
-        if selected[item.key] then
-          anchor=i
-          if i>scroll+count then scroll=i-count elseif i<=scroll then scroll=i-1 end
-        end
-      end
-      notice=#names.." "..c.tr("Received")
-      if #errors>0 then notice=notice.." / "..#errors.." "..c.tr("Failed") end
-    else notice=errors[1] or "Transfer failed" end
-    c.invalidate()
-  end,
-  events={mouse_scroll=true,mouse_click=true,key=true,key_up=true,term_resize=true},event=function(c,e,a,b,y)
-  local mods=c.modifiers()
-  if e=="mouse_scroll" then scroll=math.max(0,scroll+a)
-  elseif e=="mouse_click" and y and y>=listTop then
-    local index=scroll+y-listTop+1
-    local item=rows[index]
-    if a==2 then
-      if item and not selected[item.key] then select(index,{}) end
-      menu(c,b,y,item)
-    elseif a==1 then
-      item=select(index,mods)
-      if item and not mods.ctrl and not mods.shift then
-        local now=os.clock()
-        if lastClick==item.key and now-lastTime<.55 then lastClick=nil; open(c,item)
-        else lastClick=item.key; lastTime=now end
-      end
-    end
-  elseif e=="key" then
-    if mods.ctrl and a==keys.c then clipboard("copy")
-    elseif mods.ctrl and a==keys.x then clipboard("cut")
-    elseif mods.ctrl and a==keys.v then paste(c)
-    elseif mods.ctrl and a==keys.a then
-      selected={}; for _,item in ipairs(rows) do selected[item.key]=true end
-    elseif mods.ctrl and a==keys.l then address(c)
-    elseif mods.ctrl and a==keys.f then find(c)
-    elseif mods.ctrl and mods.shift and a==keys.n then create(c,true)
-    elseif a==keys.delete then trash(c)
-    elseif a==keys.f2 then rename(c)
-    elseif a==keys.enter then open(c,one())
-    elseif a==keys.backspace then if trashMode then goBack() else change(fs.getDir(path),true) end
-    elseif a==keys.up or a==keys.down then
-      local delta=a==keys.up and -1 or 1
-      local index=math.max(1,math.min(#rows,(anchor or 0)+delta))
-      select(index,mods)
-      local count=math.max(1,c.height-listTop+1)
-      if index<=scroll then scroll=index-1 elseif index>scroll+count then scroll=index-count end
-    end
-  end
-end}
-]=],
-    ["system-apps/files/manifest.json"]=[=[
-{
-  "id": "files",
-  "name": "Files",
-  "name_ru": "Файлы",
-  "description": "Browse",
-  "description_ru": "Обзор",
-  "version": "0.6.1",
-  "api": 1,
-  "entry": "main.lua",
-  "order": 1,
-  "icon": [
-    "011000",
-    "111100",
-    "111111",
-    "100001",
-    "100001",
-    "111111"
-  ],
-  "short": "Files",
-  "short_ru": "Файлы",
-  "author": "Juzeppe"
-}]=],
-    ["system-apps/network/main.lua"]=[=[
-local c=...
-local P=c.colors
-local net=c.network
-local tab=net:status().enabled and "peers" or "setup"
-local peer,transferKey,shareName,selectedText
-local pendingFile=c.args.file
-local notice=pendingFile and "Select a computer to send file" or ""
-local scroll=0
-local function setTab(name)
-  tab=name; scroll=0; notice=""
-end
-local function report(ok,err,success)
-  notice=ok and (success or "Done") or tostring(err or "Network operation failed")
-  c.invalidate()
-end
-local function withPeer(action)
-  if peer then action(peer); return end
-  c.prompt("Computer ID","",function(value)
-    local id=tonumber(value)
-    if not id or id<0 or id%1~=0 then notice="Invalid computer ID"; return end
-    peer=id
-    action(id)
-  end)
-end
-local function setPeer()
-  c.prompt("Computer ID",peer and tostring(peer) or "",function(value)
-    local id=tonumber(value)
-    if id and id>=0 and id%1==0 then peer=id; scroll=0
-    else notice="Invalid computer ID" end
-  end)
-end
-local function sendMessage()
-  withPeer(function(id)
-    c.prompt("Message","",function(text)
-      local ok,err=net:sendMessage(id,text)
-      report(ok,err,"Message sent")
-      if ok then setTab("chat") end
-    end)
-  end)
-end
-local function sendFile()
-  withPeer(function(id)
-    local candidate=pendingFile
-    if not candidate and c.clipboard:hasFiles() and #c.clipboard.paths==1 then candidate=c.clipboard.paths[1] end
-    c.prompt("File path",candidate or "",function(path)
-      local key,err=net:offerFile(id,path)
-      if key then transferKey=key; pendingFile=nil; setTab("files") end
-      report(key,err,"Offer sent")
-    end)
-  end)
-end
-local function share()
-  withPeer(function(id)
-    local ok,err=net:requestShared(id)
-    if ok then setTab("shares") end
-    report(ok,err,"Request sent")
-  end)
-end
-local function peerName(id)
-  if id then
-    for _,p in ipairs(net:devices()) do if p.id==id then return p.name.." #"..id end end
-    return "#"..id
-  end
-  return c.tr("No computer selected")
-end
-local function tabBar(ui)
-  local broad=ui.width>=29
-  local buttons=broad and {
-    {1," Peers ","peers"},{9," Chat ","chat"},{16," Files ","files"},{24," Setup ","setup"}
-  } or {
-    {1," Net ","peers"},{7," C ","chat"},{11," F ","files"},{15," S ","setup"}
-  }
-  for _,b in ipairs(buttons) do
-    ui.button(b[1],1,b[2],function() setTab(b[3]) end,tab==b[3] and P.accent or P.tint,tab==b[3] and P.paper or P.ink)
-  end
-end
-local function row(ui,y,text,isSelected,action)
-  local bg=isSelected and P.accent or (y%2==0 and P.tint or P.paper)
-  local fg=isSelected and P.paper or P.ink
-  ui.rect(1,y,ui.width,1,bg)
-  ui.raw(1,y,text,fg,bg)
-  if action then ui.hit(1,y,ui.width,1,action) end
-end
-local function peers(ui)
-  local s=net:status()
-  ui.raw(1,2,s.name.." #"..s.id.."  "..s.modems.." "..ui.tr("modems"),P.muted)
-  local list=net:devices()
-  local count=math.max(1,ui.height-4)
-  scroll=math.max(0,math.min(scroll,math.max(0,#list-count)))
-  for i=1,count do
-    local p=list[i+scroll]
-    if p then
-      local label=(p.online and "+ " or "- ")..p.name.." #"..p.id..(p.hub and " [H]" or "")
-      row(ui,i+2,label,peer==p.id,function() peer=p.id end)
-    end
-  end
-  if #list==0 then ui.text(1,3,s.enabled and "No computers discovered" or "Network disabled",P.muted) end
-  ui.raw(1,ui.height-1,peerName(peer),P.muted)
-  ui.button(1,ui.height," ID ",setPeer,P.tint,P.ink)
-  ui.button(6,ui.height," Msg ",sendMessage)
-  ui.button(12,ui.height," File ",sendFile)
-  ui.button(19,ui.height," Share ",share,P.deep,P.paper)
-end
-local function splitText(text,max)
-  local ok,pos=pcall(utf8.offset,text,max+1)
-  if ok and not pos then return text,"" end
-  if ok and pos then return text:sub(1,pos-1),text:sub(pos) end
-  return text:sub(1,max),text:sub(max+1)
-end
-local function copyMessage()
-  if selectedText then c.clipboard:setText(selectedText); notice="Copied"; c.invalidate()
-  else notice="Select a message" end
-end
-local function chat(ui)
-  ui.raw(1,2,peerName(peer),P.muted)
-  local messages=peer and net:messages(peer) or {}
-  local lines={}
-  for _,m in ipairs(messages) do
-    local prefix=m.direction=="out" and c.tr("Me") or m.name
-    local text=prefix..": "..m.text
-    -- Keep messages readable on narrow terminal windows.
-    for piece in (text.."\n"):gmatch("(.-)\n") do
-      repeat
-        local first,rest=splitText(piece,ui.width)
-        lines[#lines+1]={value=first,out=m.direction=="out",text=m.text}
-        piece=rest
-      until piece==""
-    end
-    if m.direction=="out" then lines[#lines+1]={value="  ["..c.tr(m.state).."]",muted=true} end
-  end
-  local count=math.max(1,ui.height-3)
-  scroll=math.max(0,math.min(scroll,math.max(0,#lines-count)))
-  local first=math.max(1,#lines-count+1-scroll)
-  for n=1,count do
-    local entry=lines[first+n-1]
-    if entry then
-      local selected=entry.text and entry.text==selectedText
-      if selected then ui.rect(1,2+n,ui.width,1,P.tint) end
-      ui.raw(1,2+n,entry.value,entry.muted and P.muted or (entry.out and P.deep or P.ink),selected and P.tint or P.paper)
-      if entry.text then ui.hit(1,2+n,ui.width,1,function() selectedText=entry.text end) end
-    end
-  end
-  if #messages==0 then ui.text(1,3,"No messages",P.muted) end
-  ui.button(1,ui.height," Write ",sendMessage)
-  ui.button(10,ui.height," ID ",setPeer,P.tint,P.ink)
-  ui.button(15,ui.height," Copy ",copyMessage,P.tint,P.ink)
-end
-local function files(ui)
-  local list=net:transfersList()
-  local count=math.max(1,ui.height-4)
-  scroll=math.max(0,math.min(scroll,math.max(0,#list-count)))
-  local selected
-  for _,t in ipairs(list) do if t.key==transferKey then selected=t end end
-  if not selected and list[1] then transferKey=list[1].key; selected=list[1] end
-  ui.text(1,2,"TRANSFERS",P.muted)
-  for i=1,count do
-    local t=list[i+scroll]
-    if t then
-      local mark=t.direction=="in" and "< " or "> "
-      row(ui,i+2,mark..t.name,transferKey==t.key,function() transferKey=t.key end)
-    end
-  end
-  if not selected then ui.text(1,3,"No transfers",P.muted) end
-  if selected then
-    local progress=selected.size==0 and (selected.state=="Received" and 100 or 0) or math.floor(selected.bytes*100/selected.size)
-    ui.raw(1,ui.height-1,c.tr(selected.state).." "..progress.."% #"..selected.peer,P.muted)
-    if selected.direction=="in" and selected.state=="Pending" then
-      ui.button(1,ui.height," Accept ",function() report(net:accept(selected.key)) end)
-      ui.button(11,ui.height," Decline ",function() report(net:decline(selected.key)) end,P.danger,P.paper)
-    elseif selected.state=="Sending" or selected.state=="Receiving" or selected.state=="Offered" then
-      ui.button(1,ui.height," Cancel ",function() report(net:cancel(selected.key)) end,P.danger,P.paper)
-      ui.button(11,ui.height," File ",sendFile)
-    else
-      ui.button(1,ui.height," Open ",function()
-        local path=net:status().receivedPath
-        if not fs.exists(path) then fs.makeDir(path) end
-        ui.openApp("files",{path=path})
-      end,P.tint,P.ink)
-      ui.button(9,ui.height," File ",sendFile)
-    end
-  else ui.button(1,ui.height," File ",sendFile) end
-end
-local function shares(ui)
-  local items=peer and net:sharedFiles(peer) or {}
-  ui.raw(1,2,peerName(peer),P.muted)
-  local count=math.max(1,ui.height-3)
-  scroll=math.max(0,math.min(scroll,math.max(0,#items-count)))
-  for i=1,count do
-    local item=items[i+scroll]
-    if item then row(ui,i+2,item.name.."  "..item.size.."B",shareName==item.name,function() shareName=item.name end) end
-  end
-  if #items==0 then ui.text(1,3,"No shared files",P.muted) end
-  ui.button(1,ui.height," Get ",function()
-    if peer and shareName then report(net:requestSharedFile(peer,shareName))
-    else notice="Select files first" end
-  end)
-  ui.button(8,ui.height," Refresh ",share,P.tint,P.ink)
-end
-local function setup(ui)
-  local s=net:status()
-  ui.button(1,2," Name ",function()
-    ui.prompt("Computer name",s.name,function(v) report(net:configure({name=v})) end)
-  end,P.tint,P.ink)
-  ui.raw(9,2,s.name.." #"..s.id)
-  ui.button(1,3," Key ",function()
-    ui.prompt("Network key (8+ bytes)","",function(v) report(net:configure({key=v})) end,true)
-  end,P.tint,P.ink)
-  ui.text(9,3,s.hasKey and "Key configured" or "No network key",P.muted)
-  ui.button(1,4,s.enabled and " Disable " or " Enable ",function() report(net:configure({enabled=not s.enabled})) end,P.accent,P.paper)
-  ui.raw(12,4,s.modems.." "..ui.tr("modems"),P.muted)
-  ui.button(1,5," Hub ",function() report(net:configure({hub=not s.hub})) end,P.tint,P.ink)
-  ui.text(9,5,s.hub and "Server mode on" or "Server mode off",P.muted)
-  ui.button(1,6," Server ID ",function()
-    ui.prompt("Server ID (blank = direct)",s.hubID>=0 and tostring(s.hubID) or "",function(v)
-      local id=v=="" and -1 or tonumber(v)
-      if not id then notice="Invalid computer ID"; return end
-      report(net:configure({hubID=id}))
-    end)
-  end,P.tint,P.ink)
-  ui.raw(13,6,s.hubID>=0 and "#"..s.hubID or c.tr("Direct"),P.muted)
-  ui.button(1,7," Shared ",function()
-    local path=net:status().sharedPath
-    if not fs.exists(path) then fs.makeDir(path) end
-    ui.openApp("files",{path=path})
-  end,P.tint,P.ink)
-  if ui.width>=31 then ui.raw(11,7,c.tr("Mailbox")..": "..s.mailbox,P.muted) end
-end
-return {draw=function(ui)
-  tabBar(ui)
-  if tab=="peers" then peers(ui)
-  elseif tab=="chat" then chat(ui)
-  elseif tab=="files" then files(ui)
-  elseif tab=="shares" then shares(ui)
-  else setup(ui) end
-  ui.status(notice)
-end,events={mouse_scroll=true,key=true},event=function(ui,e,a)
-  if e=="mouse_scroll" then scroll=math.max(0,scroll+(tab=="chat" and -a or a))
-  elseif e=="key" and a==keys.escape then setTab("peers")
-  elseif e=="key" and tab=="chat" and a==keys.c and ui.modifiers().ctrl then copyMessage() end
-end}
-]=],
-    ["system-apps/network/manifest.json"]=[=[
-{
-  "id": "network",
-  "name": "Network",
-  "name_ru": "Сеть",
-  "description": "Local network and city server",
-  "description_ru": "Общение и передача файлов",
-  "version": "0.6.1",
-  "api": 1,
-  "entry": "main.lua",
-  "order": 7,
-  "icon": [
-    "011110",
-    "010010",
-    "111111",
-    "001100",
-    "111111",
-    "100001"
-  ],
-  "short": "Net",
-  "short_ru": "Сеть",
-  "author": "Juzeppe"
-}]=],
-    ["system-apps/notes/main.lua"]=[=[
-local ctx=...
-local P=ctx.colors
-local file=ctx.dataPath.."/notes.txt"
-if not fs.exists(file) and fs.exists("/.juzeppe/notes.txt") then fs.copy("/.juzeppe/notes.txt",file) end
-return {draw=function(c)
-  c.text(2,1,"Personal notebook")
-  c.button(2,2," Edit note ",function() c.launch("/rom/programs/edit.lua",file) end)
-  local text=c.read(file)
-  if not text or text=="" then c.text(2,4,"Your notebook is empty.")
-  else
-    local y=4
-    for row in (text.."\n"):gmatch("(.-)\n") do
-      repeat
-        if y>c.height then break end
-        c.raw(2,y,row:sub(1,c.width-3))
-        row=row:sub(c.width-2)
-        y=y+1
-      until row==""
-      if y>c.height then break end
-    end
-  end
-  c.status("Saved locally")
-end}
-]=],
-    ["system-apps/notes/manifest.json"]=[=[
-{
-  "id": "notes",
-  "name": "Notes",
-  "name_ru": "Заметки",
-  "description": "Notebook",
-  "description_ru": "Блокнот",
-  "version": "0.6.1",
-  "api": 1,
-  "entry": "main.lua",
-  "order": 2,
-  "icon": [
-    "111100",
-    "100110",
-    "101011",
-    "100001",
-    "101101",
-    "111111"
-  ],
-  "short": "Notes",
-  "short_ru": "Заметки",
-  "author": "Juzeppe"
-}]=],
-    ["system-apps/packages/main.lua"]=[=[
-local ctx=...
-local P=ctx.colors
-local pkg=ctx.package
-local tab="catalog"
-local list={}
-local scroll,selected=0,1
-local function useList(result,err)
-  if result then list=result; selected=math.max(1,math.min(selected,#list))
-  else ctx.status(err) end
-end
-local function reload(remote)
-  if tab=="installed" then useList(pkg.installed()); return end
-  if remote and pkg.repository()~="" then
-    if ctx.busy then return end
-    ctx.status("Syncing catalog...")
-    ctx.job(function() return pkg.catalog(true) end,function(result,err)
-      if tab=="catalog" then useList(result,err); if result then ctx.status("Catalog updated") end end
-    end)
-  else useList(pkg.catalog(remote)) end
-end
-reload(false)
-if pkg.repository()~="" then reload(true) end
-local function switch(t)
-  tab=t
-  list={}
-  selected=1
-  scroll=0
-  reload(false)
-end
-local function installFile()
-  ctx.prompt("Path to .juz file","/",function(path)
-    local m,err=pkg.installFile(path)
-    ctx.status(m and (ctx.tr("Installed").." "..m.name) or err)
-    ctx.refreshApps()
-    reload(false)
-  end)
-end
-local function repository()
-  ctx.prompt("Repository URL (empty = local)",pkg.repository(),function(url)
-    local ok,err=pkg.setRepository(url)
-    if not ok then ctx.status(err); return end
-    ctx.status("Repository saved")
-    if tab=="catalog" then reload(false); if url~="" then reload(true) end end
-  end)
-end
-local function action()
-  if ctx.busy then return end
-  local item=list[selected]
-  if not item then return end
-  if tab=="catalog" then
-    ctx.confirm("Install this package?",function()
-      ctx.status("Installing package...")
-      ctx.job(function() return pkg.installCatalog(item) end,function(m,err)
-        ctx.status(m and (ctx.tr("Installed").." "..m.name) or err)
-        ctx.refreshApps()
-        reload(false)
-      end)
-    end)
-  else
-    if item.system then ctx.status("System application"); return end
-    ctx.confirm("Remove application?",function()
-      local ok,err=pkg.remove(item.id)
-      ctx.status(ok and "Application removed" or err)
-      ctx.refreshApps()
-      reload(false)
-    end)
-  end
-end
-local function draw(c)
-  c.button(1,1," Catalog ",function() switch("catalog") end,tab=="catalog" and P.accent or P.tint,tab=="catalog" and P.paper or P.ink)
-  c.button(10,1," Installed ",function() switch("installed") end,tab=="installed" and P.accent or P.tint,tab=="installed" and P.paper or P.ink)
-  c.button(1,2," File ",installFile,P.tint,P.ink)
-  c.button(8,2," Repo ",repository,P.tint,P.ink)
-  c.button(15,2," Sync ",function() reload(true) end,P.tint,P.ink)
-  c.rect(1,3,c.width,1,P.tint)
-  c.text(1,3,"APPLICATION / VERSION",P.muted,P.tint)
-  local count=math.max(1,c.height-5)
-  scroll=math.max(0,math.min(scroll,math.max(0,#list-count)))
-  if #list==0 then c.text(1,4,"No applications") end
-  for j=1,count do
-    local index=j+scroll
-    local item=list[index]
-    if item then
-      local row=j+3
-      local bg=index==selected and P.tint or P.paper
-      c.rect(1,row,c.width,1,bg)
-      local name=c.getLanguage()=="en" and item.name or (item.name_ru or item.name)
-      c.raw(1,row,(index==selected and "> " or "  ")..name,P.ink,bg)
-      local version=item.version..(item.system and "*" or "")
-      c.raw(c.width-#version+1,row,version,P.muted,bg)
-      c.hit(1,row,c.width,1,function() selected=index end)
-    end
-  end
-  local m=list[selected]
-  if m then
-    local detail=c.getLanguage()=="en" and m.description or (m.description_ru or m.description)
-    c.raw(1,c.height-1,detail or "",P.muted)
-    if c.busy then c.text(1,c.height,"Please wait...",P.muted); return end
-    if tab=="catalog" then
-      local old=pkg.find(m.id)
-      local canInstall=not old or pkg.newer(m.version,old.version)
-      if canInstall then c.button(1,c.height,old and " Update " or " Install ",action)
-      else c.text(1,c.height,"Already installed",P.muted) end
-    elseif not m.system then c.button(1,c.height," Remove ",action,P.danger,P.paper)
-    else c.text(1,c.height,"System application",P.muted) end
-  end
-end
-return {draw=draw,events={mouse_scroll=true,key=true,term_resize=true},event=function(c,e,a)
-  local count=math.max(1,c.height-5)
-  if e=="mouse_scroll" then scroll=math.max(0,math.min(math.max(0,#list-count),scroll+a))
-  elseif e=="key" and (a==keys.up or a==keys.down) then
-    selected=math.max(1,math.min(#list,selected+(a==keys.up and -1 or 1)))
-    if selected<=scroll then scroll=selected-1 elseif selected>scroll+count then scroll=selected-count end
-  elseif e=="key" and a==keys.enter then action() end
-end}
-
-]=],
-    ["system-apps/packages/manifest.json"]=[=[
-{
-  "id": "packages",
-  "name": "Apps",
-  "name_ru": "Магазин",
-  "description": "Packages",
-  "description_ru": "Пакеты",
-  "version": "0.6.1",
-  "api": 1,
-  "entry": "main.lua",
-  "order": 5,
-  "icon": [
-    "111111",
-    "100001",
-    "110011",
-    "101101",
-    "100001",
-    "111111"
-  ],
-  "short": "Apps",
-  "short_ru": "Магазин",
-  "author": "Juzeppe"
-}]=],
-    ["system-apps/settings/main.lua"]=[=[
-local ctx=...
-local P=ctx.colors
-return {refresh=false,draw=function(c)
-  c.text(1,1,"Language")
-  local language=c.getLanguage()
-  c.button(1,2," EN ",function() c.setLanguage("en") end,language=="en" and P.accent or P.tint,language=="en" and P.paper or P.ink)
-  c.button(6,2," RU ",function() c.setLanguage("ru") end,language=="ru" and P.accent or P.tint,language=="ru" and P.paper or P.ink)
-  c.button(11,2," RU-Lat ",function() c.setLanguage("translit") end,language=="translit" and P.accent or P.tint,language=="translit" and P.paper or P.ink)
-  c.text(1,3,"RU needs Cyrillic font",P.muted)
-  local i,themes=c.getTheme()
-  for n,t in ipairs(themes) do
-    local y=3+n
-    local bg=i==n and P.tint or P.paper
-    c.rect(1,y,c.width,1,bg)
-    c.raw(1,y,(i==n and "* " or "  ")..c.tr(t.name),P.ink,bg)
-    c.hit(1,y,c.width,1,function() c.setTheme(n) end)
-  end
-  c.status("Settings saved")
-end}
-]=],
-    ["system-apps/settings/manifest.json"]=[=[
-{
-  "id": "settings",
-  "name": "Settings",
-  "name_ru": "Настройки",
-  "description": "Themes",
-  "description_ru": "Темы",
-  "version": "0.6.1",
-  "api": 1,
-  "entry": "main.lua",
-  "order": 4,
-  "icon": [
-    "001100",
-    "011110",
-    "110011",
-    "110011",
-    "011110",
-    "001100"
-  ],
-  "short": "Prefs",
-  "short_ru": "Настр.",
-  "author": "Juzeppe"
-}]=],
-    ["system-apps/terminal/main.lua"]=[=[
-local started=false
-return {refresh=false,draw=function(c)
-  if not started then
-    started=true
-    c.status("Type exit to return")
-    c.launch()
-  else
-    c.text(2,2,"Shell session ended")
-    c.button(2,4," Start shell ",function() c.launch() end)
-  end
-end,onReturn=function(c) c.status("Shell session ended") end}
-]=],
-    ["system-apps/terminal/manifest.json"]=[=[
-{
-  "id": "terminal",
-  "name": "Terminal",
-  "name_ru": "Терминал",
-  "description": "Commands",
-  "description_ru": "Команды",
-  "version": "0.6.1",
-  "api": 1,
-  "entry": "main.lua",
-  "order": 3,
-  "icon": [
-    "111111",
-    "100001",
-    "110001",
-    "101101",
-    "100001",
-    "111111"
-  ],
-  "short": "Shell",
-  "short_ru": "Shell",
-  "author": "Juzeppe"
-}]=],
   }
   local swapped={}
   local ok,err=pcall(function()
