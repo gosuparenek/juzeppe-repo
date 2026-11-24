@@ -1,7 +1,7 @@
--- JuzeppeOS 0.7.0 Sandstone installer / launcher
+-- JuzeppeOS 0.8.0 Sandstone installer / launcher
 local args={...}
 local root="/juzeppe"
-local version="0.7.0"
+local version="0.8.0"
 local function read(path)
   if not fs.exists(path) or fs.isDir(path) then return nil end
   local f=fs.open(path,"r")
@@ -186,19 +186,87 @@ if not success then printError(why) else print("Server stopped.") end
   }
 }]=],
     ["start.lua"]=[=[
-local fn,err=loadfile("/juzeppe/system/core.lua","t",_ENV)
-if not fn then printError(err); return end
-shell.setAlias("jpkg","/juzeppe/bin/jpkg.lua")
-shell.setAlias("juznet","/juzeppe/bin/juznet.lua")
-fn()
-
+local k=dofile("/juzeppe/system/kernel.lua")()
+local journal=dofile("/juzeppe/system/journal.lua")
+local pkg=dofile("/juzeppe/system/packages.lua")
+local net=dofile("/juzeppe/system/network.lua")
+if _G.__juzeppe_active_network then error("Juzeppe network already running",0) end
+local desktop,latest,active=nil,nil,nil
+local serial=0
+local network=net.new({notify=function(msg) if desktop then k.send(desktop,"system_notice",msg) end end})
+k.network=network
+k.latest=function() return latest end
+function k.install(item)
+  if active then return nil,"Another installation is running" end
+  serial=serial+1
+  local op={id=serial,app=item.id,state="queued"}
+  latest,active=op,op
+  local pid=k.spawn("installer",function()
+    os.pullEventRaw("install")
+    op.state="downloading"
+    local ok,result,err=pcall(pkg.installCatalog,item)
+    op.state=ok and result and "installed" or "failed"
+    op.error=op.state=="failed" and tostring(ok and err or result) or nil
+    journal("packages",op.app,op.error or op.state)
+  end,function(reason)
+    if reason=="crash" then op.state="failed"; op.error="Installer stopped" end
+    active=nil
+    if desktop then k.send(desktop,"package_result",op.id) end
+  end)
+  k.send(pid,"install")
+  return op.id
+end
+local host=term.current()
+local original=dofile("/juzeppe/system/palette.lua").capture(host)
+local function recovery(reason)
+  term.redirect(host)
+  host.setBackgroundColor(colors.black); host.setTextColor(colors.white)
+  host.clear(); host.setCursorPos(1,1)
+  print("Desktop "..reason..". Services are running.")
+  print("R: start desktop   Q: exit JuzeppeOS")
+end
+local function launch()
+  local pid=k.spawn("desktop",function() return assert(loadfile("/juzeppe/system/core.lua","t",_ENV))(k) end,function(reason)
+    desktop=nil
+    if reason=="exit" then k.running=false
+    elseif reason=="restart" then os.queueEvent("juzeppe_start_desktop")
+    else recovery(reason) end
+  end)
+  if k.processes[pid] then desktop=pid end
+end
+local ok,err=xpcall(function()
+  journal("kernel","boot","0.8.0")
+  _G.__juzeppe_active_network=network
+  k.spawn("network",function()
+    network:start()
+    local timer=os.startTimer(1)
+    while true do
+      local e=table.pack(os.pullEventRaw())
+      if e[1]=="timer" and e[2]==timer then network:tick(); timer=os.startTimer(1)
+      else network:event(table.unpack(e,1,e.n)) end
+    end
+  end,function() network:close() end)
+  launch()
+  while k.running do
+    local e=table.pack(os.pullEventRaw())
+    if not desktop and (e[1]=="juzeppe_start_desktop" or (e[1]=="key" and e[2]==keys.r)) then launch()
+    elseif not desktop and e[1]=="key" and e[2]==keys.q then k.running=false
+    else k.dispatch(table.unpack(e,1,e.n)) end
+  end
+end,function(e) journal("kernel","boot",e,coroutine.running()); return e end)
+for pid in pairs(k.processes) do k.stop(pid,"shutdown") end
+_G.__juzeppe_active_network=nil
+term.redirect(host)
+dofile("/juzeppe/system/palette.lua").restore(host,original)
+if not ok then error(err,0) end
+print("JuzeppeOS closed.")
 ]=],
     ["system-apps/about/main.lua"]=[=[
 return {refresh=false,draw=function(c)
   local P=c.colors
   c.text(2,1,"J U Z E P P E  /  OS",P.accent)
   c.text(2,3,"Sandstone Edition")
-  c.text(2,4,"Version 0.7.0 / API 1")
+  c.text(2,4,"Version 0.8.0 / API 1")
   c.text(2,5,"CraftOS / CC: Tweaked")
   c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
   c.status("Designed for Juzeppe")
@@ -212,7 +280,7 @@ end}
   "name_ru": "Об ОС",
   "description": "System",
   "description_ru": "Система",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "api": 1,
   "entry": "main.lua",
   "order": 8,
@@ -1028,14 +1096,9 @@ local function action()
   if not item then return end
   if tab=="catalog" then
     ctx.confirm(tr("Install this application?","Установить приложение?"),function()
-      loading=true
-      ctx.status(tr("Downloading application...","Скачиваем приложение..."))
-      ctx.installJob(function() return pkg.installCatalog(item) end,function(app,err)
-        loading=false
-        ctx.status(app and (tr("Installed ","Установлено ")..app.name) or err)
-        ctx.refreshApps()
-        reload(false)
-      end)
+      local id,err=ctx.installPackage(item)
+      ctx.status(id and ("#"..id.." "..item.name) or err)
+      ctx.invalidate()
     end)
   else
     if item.system then ctx.status(tr("System application","Системное приложение")); return end
@@ -1074,6 +1137,8 @@ end
 
 local function draw(c)
   local w,h=c.width,c.height
+  local op=c.latestInstall()
+  if op then c.status(("#%d %s: %s"):format(op.id,op.app,op.error or op.state)) end
   if w<22 or h<10 then c.text(1,1,"Resize window"); return end
 
   c.rect(1,1,w,1,P.deep)
@@ -1136,9 +1201,10 @@ end
 reload(false)
 if pkg.repository()~="" then reload(true) end
 
-return {draw=draw,events={mouse_scroll=true,key=true,term_resize=true},event=function(c,e,a)
+return {draw=draw,events={package_result=true,mouse_scroll=true,key=true,term_resize=true},event=function(c,e,a)
   local count=math.max(1,math.floor((c.height-7)/2))
-  if e=="mouse_scroll" then
+  if e=="package_result" then reload(false)
+  elseif e=="mouse_scroll" then
     scroll=math.max(0,math.min(math.max(0,#visible-count),scroll+a))
   elseif e=="key" and (a==keys.up or a==keys.down) then
     selected=math.max(1,math.min(#visible,selected+(a==keys.up and -1 or 1)))
@@ -1154,7 +1220,7 @@ end}
   "name_ru": "Магазин",
   "description": "Packages",
   "description_ru": "Пакеты",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "api": 1,
   "entry": "main.lua",
   "order": 5,
@@ -1603,6 +1669,8 @@ return M
 
 ]=],
     ["system/core.lua"]=[=[
+local kernel=...
+local desktopExit='exit'
 local U=assert(loadfile("/juzeppe/system/util.lua","t",_ENV))()
 local palette=assert(loadfile("/juzeppe/system/palette.lua","t",_ENV))()
 local locale=assert(loadfile("/juzeppe/system/locale.lua","t",_ENV))()
@@ -1614,7 +1682,6 @@ local layout=assert(loadfile("/juzeppe/system/desktop-layout.lua","t",_ENV))()
 local compositor=assert(loadfile("/juzeppe/system/compositor.lua","t",_ENV))()
 local fileops=assert(loadfile("/juzeppe/system/fileops.lua","t",_ENV))()
 local clipboard=assert(loadfile("/juzeppe/system/clipboard.lua","t",_ENV))().new()
-local networkAPI=assert(loadfile("/juzeppe/system/network.lua","t",_ENV))()
 local P=palette.colors
 local host=term.current()
 if not host.isColor() then print("JuzeppeOS needs a colour computer."); return end
@@ -1721,8 +1788,7 @@ local function message(value)
   notice=tostring(value or "")
   noticeUntil=os.clock()+6
 end
-if _G.__juzeppe_active_network then printError("Juzeppe network is already running."); return end
-local network=networkAPI.new({notify=message})
+local network=kernel.network
 local journal=dofile('/juzeppe/system/journal.lua')
 local function safe(fn,...)
   local ok,err=pcall(fn,...)
@@ -1764,15 +1830,20 @@ local function openApp(id,args)
     process:attach(win,args,nil,documents)
     return win
   end
-  if not m.system and m.id=="office" then
-    prompt(nil,"Office: allow Desktop, clipboard & printers?","",function() launch(true) end,true)
-    return
+  local grants={}
+  local requests=m.permissions or {}
+  local function request(i)
+    local permission=requests[i]
+    if not permission then return launch(grants) end
+    prompt(nil,m.name.." / "..permission.."?","",function()
+      grants[permission]=true; request(i+1)
+    end,true)
   end
-  return launch(false)
+  return request(1)
 end
 process=processAPI.new(host,P,locale,{
   newWindow=function(win,proc,docs) process:attach(wm:newWindow(win.app),{},proc,docs) end,
-  pkg=pkg,desktopPath=desktop.path,refresh=refresh,
+  kernel=kernel,pkg=pkg,desktopPath=desktop.path,refresh=refresh,
   clipboard=clipboard,network=network,
   refreshDesktop=function() pollDesktop(); desktopDirty=true end,
   modifiers=function() return {ctrl=ctrlDown,shift=shiftDown,alt=altDown} end,
@@ -2010,7 +2081,7 @@ local function drawBar()
   local available=clockX-x
   if available<4 then return end
   if #tasks==0 then
-    if available>=6 then line(x+1,H,"v0.7.0",P.tint,P.ink) end
+    if available>=6 then line(x+1,H,"v0.8.0",P.tint,P.ink) end
     return
   end
   local count=math.max(1,math.floor(available/9))
@@ -2110,7 +2181,13 @@ local function drawMenu()
   local query=menuQuery~="" and locale.render(menuQuery) or locale.text("Type to search")
   line(2,H-2,clip("> "..query,width-2),P.muted,P.tint)
   line(2,H-1,locale.text("Exit OS"),P.danger,P.paper)
-  hit(overlayHits,1,H-1,width,1,function() running=false end)
+  hit(overlayHits,1,H-1,9,1,function() running=false end)
+  btn(overlayHits,11,H-1," Restart UI ",function()
+    prompt(nil,"Close windows and restart desktop?","",function() desktopExit="restart"; running=false end,true)
+  end,P.deep,P.paper)
+  if width>=32 then btn(overlayHits,24,H-1," Stop UI ",function()
+    prompt(nil,"Close windows and stop desktop?","",function() desktopExit="stopped"; running=false end,true)
+  end,P.deep,P.paper) end
 end
 local function drawTasks()
   local tasks=wm:tasks()
@@ -2134,7 +2211,7 @@ local function drawTasks()
       local prefix=t.minimized and "- " or (t==wm.focused and "> " or "  ")
       line(x+1,row,clip(prefix.."#"..t.process.pid.." "..windowName(t),width-5),P.ink,bg)
       hit(overlayHits,x,row,width-3,1,function() focus(t) end)
-      if t.ctx.busy then btn(overlayHits,x+width-9,row," Stop ",function() if not process:cancelJob(t) then message("Installation in progress") end end,P.deep,P.paper) end
+      if t.ctx.busy or (t.worker and t.worker.filter==t.sliceEvent) then btn(overlayHits,x+width-9,row," Stop ",function() if not process:cancelJob(t) then message("Installation in progress") end end,P.deep,P.paper) end
       btn(overlayHits,x+width-3,row," X ",function() closeWindow(t) end,P.danger,P.paper)
     end
   end
@@ -2453,11 +2530,9 @@ local function fileTransfer(transfer)
   end
 end
 local function run()
-  journal("kernel","boot","0.7.0")
+  journal("desktop","start","0.8.0")
   refresh()
   pollDesktop()
-  _G.__juzeppe_active_network=network
-  network:start()
   local netRevision=network.revision
   timer=os.startTimer(1)
   local previousClock=clock()
@@ -2468,10 +2543,10 @@ local function run()
     if redraw then draw(); redraw=false end
     local packet=table.pack(os.pullEventRaw())
     local e,a,b,c,d=table.unpack(packet,1,5)
-    if network:event(table.unpack(packet,1,packet.n)) then redraw=true end
+
     if e=="timer" and a==timer then
       timer=os.startTimer(1)
-      network:tick()
+
       local now=clock()
       if now~=previousClock then previousClock=now; redraw=true end
       if notice~="" and os.clock()>noticeUntil then notice=""; redraw=true end
@@ -2483,7 +2558,8 @@ local function run()
         if not win.minimized and win.instance and win.instance.refresh==true then win.dirty=true; redraw=true end
       end
     end
-    if e=="juzeppe_ready" then process:pump(); redraw=true
+    if e=="system_notice" then message(a); redraw=true
+    elseif e=="juzeppe_ready" then process:pump(); redraw=true
     elseif e=="juzeppe_packages_changed" then refresh(); redraw=true
     elseif e=="file_transfer" then fileTransfer(a); redraw=true
     elseif e=="terminate" then
@@ -2514,8 +2590,7 @@ local function run()
   end
 end
 local ok,err=xpcall(run,function(e) journal('kernel','run',e,coroutine.running()); return e end)
-pcall(function() network:close() end)
-if _G.__juzeppe_active_network==network then _G.__juzeppe_active_network=nil end
+
 for _,win in ipairs(wm:tasks()) do process:close(win) end
 if timer then os.cancelTimer(timer) end
 term.redirect(host)
@@ -2524,14 +2599,8 @@ host.setBackgroundColor(colors.black)
 host.setTextColor(colors.white)
 host.clear()
 host.setCursorPos(1,1)
-if not ok then printError("JuzeppeOS: "..tostring(err)) else print("JuzeppeOS closed.") end
-
-
-
-
-
-
-
+if not ok then error(err,0) end
+return desktopExit
 ]=],
     ["system/desktop-layout.lua"]=[=[
 local U=assert(loadfile("/juzeppe/system/util.lua","t",_ENV))()
@@ -3583,6 +3652,15 @@ function M.newer(a,b)
 end
 function M.validateManifest(m)
   if type(m)~="table" or not idOK(m.id) then return nil,"Invalid app ID" end
+  if m.permissions~=nil then
+    if type(m.permissions)~="table" then return nil,"Invalid permissions" end
+    local seen={}
+    for i,v in pairs(m.permissions) do
+      if type(i)~="number" or i%1~=0 or i<1 or i>#m.permissions or
+        (v~="desktop.files" and v~="printer" and v~="clipboard") or seen[v] then return nil,"Invalid permission" end
+      seen[v]=true
+    end
+  end
   if not version(m.version) then return nil,"Version must be X.Y.Z" end
   if type(m.name)~="string" or #m.name==0 or #m.name>80 then return nil,"Invalid name" end
   if m.api~=M.api then return nil,"Incompatible application API" end
@@ -3624,6 +3702,10 @@ function M.installed()
         if idOK(id) and fs.isDir(where.."/"..id) then
           local m=U.json(where.."/"..id.."/manifest.json")
           if M.validateManifest(m) and m.id==id and fs.exists(where.."/"..id.."/"..m.entry) then
+            if where==apps and not m.permissions then
+              local legacy=U.json(M.root.."/repo/legacy-permissions.json") or {}
+              m.permissions=legacy[m.id.."@"..m.version]
+            end
             m.path=where.."/"..id
             m.system=where==system
             list[#list+1]=m
@@ -3815,8 +3897,10 @@ end
 ]=],
     ["system/app-env.lua"]=[=[
 -- Build a fresh capability environment for each installed application.
-return function(win,c,documents,locale)
+return function(win,c,grants,locale)
   local function copy(t) local r={} for k,v in pairs(t or {}) do r[k]=v end return r end
+  grants=grants or {}
+  local documents=grants["desktop.files"]
   local root=fs.combine("",c.dataPath)
   local desk=fs.combine("",c.desktopPath)
   local function path(p)
@@ -3853,13 +3937,19 @@ return function(win,c,documents,locale)
     term={setCursorPos=win.surface.setCursorPos,blit=win.surface.blit}}
   if documents then
     api.refreshDesktop=c.refreshDesktop
+  end
+  if grants.clipboard then
     api.clipboard={getText=function() return c.clipboard:getText() end,setText=function(_,v) assert(type(v)=="string"); c.clipboard:setText(v) end}
+  end
+  if grants.printer then
     local function printer(n) return peripheral.hasType(n,"printer") end
     env.peripheral={hasType=function(n,t) return t=="printer" and printer(n) end,
       getNames=function() local names={} for _,n in ipairs(peripheral.getNames()) do if printer(n) then names[#names+1]=n end end return names end,
       wrap=function(n) if printer(n) then local p=peripheral.wrap(n); local r={}
         for _,k in ipairs({"getInkLevel","getPaperLevel","newPage","getPageSize","setPageTitle","setCursorPos","write","endPage"}) do r[k]=p[k] end
         return r end end}
+  end
+  do
     env.dofile=function(p)
       if p=="/juzeppe/system/locale.lua" then return {render=locale.render} end
       if p=="/juzeppe/system/fileops.lua" then return {unique=function(dir,name)
@@ -3998,9 +4088,15 @@ function M.new(host,P,locale,config)
     else job.filter=result[2] end
   end
   function self:cancelJob(win)
+    if win.worker and win.worker.filter==win.sliceEvent and not win.trusted then
+      win.worker=nil
+      win.pending={}; win.process.inbox[win]=win.pending
+      win.loading=false; win.dirty=true; win.notice="Cancelled"
+      return true
+    end
     for i=#self.jobs,1,-1 do
       local j=self.jobs[i]
-      if j.owner==win and not j.service then
+      if j.owner==win then
         j.finished=true; table.remove(self.jobs,i)
         win.ctx.busy=false; win.dirty=true
         if j.callback then self:action(win,j.callback,nil,"Cancelled") end
@@ -4008,11 +4104,11 @@ function M.new(host,P,locale,config)
       end
     end
   end
-  function self:startJob(win,fn,callback,service)
+  function self:startJob(win,fn,callback)
     if win.closed or win.ctx.busy then return false end
     win.dirty=true
     win.ctx.busy=true
-    local job={owner=win,service=service,filter=STEP,thread=coroutine.create(fn),callback=callback,redirect=service and host or win.surface}
+    local job={owner=win,filter=STEP,thread=coroutine.create(fn),callback=callback,redirect=win.surface}
     self.jobs[#self.jobs+1]=job
     enqueue(job)
     return true
@@ -4031,7 +4127,7 @@ function M.new(host,P,locale,config)
   end
   function self:attach(win,args,parent,documents)
     local proc=parent
-    if not proc then self.serial=self.serial+1; proc={pid=self.serial,windows={},inbox={},shared={},state="running"}; self.processes[proc.pid]=proc end
+    if not proc then proc={pid=config.kernel.allocate(),windows={},inbox={},shared={},state="running"}; self.processes[proc.pid]=proc end
     win.process=proc; proc.windows[win]=true; proc.inbox[win]=win.pending; win.cleanup={}
     win.trusted=win.app.system==true or win.ephemeral==true
     local app=win.app
@@ -4076,10 +4172,35 @@ function M.new(host,P,locale,config)
     if not app.path then return end
     local env,api
     if win.trusted then env=setmetatable({juzeppe=c},{__index=_ENV}); api=c
-      if app.id=="packages" then c.installJob=function(fn,cb) return self:startJob(win,fn,cb,true) end end
+      c.installPackage=config.kernel.install
+      c.latestInstall=config.kernel.latest
     else env,api=appEnv(win,c,documents,locale) end
     win.api=api
-    local fn,err=loadfile(app.path.."/"..app.entry,"t",env)
+    local path=app.path.."/"..app.entry
+    local fn,err
+    win.sliceEvent="juzeppe_slice_"..proc.pid.."_"..win.id
+    if win.trusted then fn,err=loadfile(path,"t",env)
+    else
+      local checks,deadline=0,0
+      local function checkpoint()
+        checks=checks+1
+        if checks%128~=0 then return end
+        local now=os.epoch("utc")
+        if now<deadline then return end
+        deadline=now+25
+        local thread=coroutine.running()
+        if win.worker and win.worker.thread==thread then
+          os.queueEvent(win.sliceEvent)
+          coroutine.yield(win.sliceEvent)
+        else
+          for _,job in ipairs(self.jobs) do
+            if job.thread==thread then coroutine.yield(STEP); return end
+          end
+          if win.drawDeadline and now>=win.drawDeadline then error("Draw exceeded its time budget",0) end
+        end
+      end
+      fn,err=dofile("/juzeppe/system/app-loader.lua")(path,env,checkpoint)
+    end
     if not fn then journal(app.id,'load',err); setNotice(win,"App error: "..tostring(err)); return end
     win.loading=true
     win.pending[#win.pending+1]={fn=fn,args=table.pack(api),done=function(ok,result)
@@ -4104,6 +4225,10 @@ function M.new(host,P,locale,config)
     end
   end
   function self:event(win,event,...)
+    if event==win.sliceEvent and not win.closed then
+      if win.worker and win.worker.filter==event then self:resumeWorker(win); return true end
+      return false
+    end
     if not win.trusted and not inputEvent(event) and event~='term_resize' and event~='terminate' then return false end
     if win.closed then return false end
     local changed=false
@@ -4147,7 +4272,9 @@ function M.new(host,P,locale,config)
     if win.loading then win.ctx.text(2,2,"Loading...",P.muted)
     elseif win.instance then
       local thread=coroutine.create(function() win.instance.draw(win.api) end)
+      win.drawDeadline=os.epoch('utc')+100
       local result=resume(thread,win.surface)
+      win.drawDeadline=nil
       if not result[1] or coroutine.status(thread)~="dead" then
         journal(win.app.id,"draw",result[1] and "draw yielded" or result[2],thread)
         setNotice(win,"App error: "..tostring(result[1] and "draw must not yield; use ui.job" or result[2]))
@@ -4175,8 +4302,7 @@ function M.new(host,P,locale,config)
     win.worker=nil; win.pending={}
     for i=#self.jobs,1,-1 do local j=self.jobs[i]
       if j.owner==win then
-        if j.service then j.owner={closed=true,trusted=true,ctx={},app={id="package-service"}}; j.callback=nil
-        else j.finished=true; table.remove(self.jobs,i) end
+        j.finished=true; table.remove(self.jobs,i)
       end
     end
     for i=#self.ready,1,-1 do if self.ready[i].finished then table.remove(self.ready,i) end end
@@ -4430,7 +4556,7 @@ return M
   "Interrupted": "Прервано",
   "Could not save message": "Не удалось сохранить сообщение",
   "Network changed": "Сеть изменена",
-  "Version 0.7.0 / API 1": "Версия 0.7.0 / API 1"
+  "Version 0.8.0 / API 1": "Версия 0.8.0 / API 1"
 }
 ]=],
     ["system/session.lua"]=[=[
@@ -4710,6 +4836,124 @@ return M
 
 
 ]=],
+    ["system/kernel.lua"]=[=[
+-- All host events enter here. A PID may run without owning a terminal window.
+local journal=dofile("/juzeppe/system/journal.lua")
+return function()
+  local k={processes={},running=true}
+  local serial=0
+  function k.allocate()
+    serial=serial+1
+    return serial
+  end
+  function k.send(pid,event,...)
+    if k.processes[pid] then os.queueEvent("juzeppe_message",pid,event,...) end
+  end
+  function k.stop(pid,reason)
+    local p=k.processes[pid]
+    if not p then return end
+    k.processes[pid]=nil
+    if p.finish then
+      local ok,e=pcall(p.finish,reason)
+      if not ok then journal(p.name,"cleanup",e) end
+    end
+  end
+  local function resume(p,...)
+    local previous=term.redirect(p.terminal)
+    local ok,result=coroutine.resume(p.thread,...)
+    p.terminal=term.current()
+    term.redirect(previous)
+    if not ok then journal(p.name,"crash",result,p.thread); k.stop(p.pid,"crash")
+    elseif coroutine.status(p.thread)=="dead" then k.stop(p.pid,result or "done")
+    else
+      p.filter=result
+      for i,msg in ipairs(p.mailbox) do
+        if not p.filter or p.filter==msg[1] then
+          table.remove(p.mailbox,i)
+          k.send(p.pid,table.unpack(msg,1,msg.n))
+          break
+        end
+      end
+    end
+  end
+  function k.spawn(name,fn,finish)
+    local p={pid=k.allocate(),name=name,mailbox={},thread=coroutine.create(fn),terminal=term.current(),finish=finish}
+    k.processes[p.pid]=p
+    resume(p,p.pid)
+    return p.pid
+  end
+  function k.dispatch(event,...)
+    if event=="juzeppe_message" then
+      local pid,name=...
+      local p=k.processes[pid]
+      if p then
+        if not p.filter or p.filter==name then resume(p,name,select(3,...))
+        elseif #p.mailbox<64 then p.mailbox[#p.mailbox+1]=table.pack(name,select(3,...))
+        else journal(p.name,"mailbox","Queue full") end
+      end
+      return
+    end
+    local ids={}
+    for pid in pairs(k.processes) do ids[#ids+1]=pid end
+    table.sort(ids)
+    for _,pid in ipairs(ids) do
+      local p=k.processes[pid]
+      if p and (not p.filter or p.filter==event or event=="terminate") then resume(p,event,...) end
+    end
+  end
+  return k
+end
+]=],
+    ["repo/legacy-permissions.json"]=[=[
+{"office@1.0.0":["desktop.files","clipboard","printer"]}
+]=],
+    ["system/app-loader.lua"]=[=[
+-- Insert scheduling points at Lua loop and function entries; leave literals and comments intact.
+return function(path,env,checkpoint)
+  local handle,err=fs.open(path,"r")
+  if not handle then return nil,err end
+  local source=handle.readAll(); handle.close()
+  local name="__juzeppe_checkpoint"
+  while source:find(name,1,true) do name=name.."_" end
+  local chunks={"return function("..name..") return function(...) "}; local i=1
+  local parameters=false
+  while i<=#source do
+    local start=i
+    local ch=source:sub(i,i)
+    local comment=source:sub(i,i+1)=="--"
+    local at=comment and i+2 or i
+    local equals=source:match("^%[(=*)%[",at)
+    local inject=false
+    if equals then
+      local _,last=source:find("]"..equals.."]",at+#equals+2,true)
+      if not last then return nil,"Unclosed long literal" end
+      i=last+1
+    elseif comment then i=source:find("\n",at,true) or (#source+1)
+    elseif ch=="'" or ch=='"' then
+      i=i+1
+      while i<=#source do
+        local c=source:sub(i,i); i=i+1
+        if c=="\\" then i=i+1 elseif c==ch then break end
+      end
+    elseif ch:match("[%a_]") then
+      local _,last=source:find("^[%w_]+",i)
+      i=last+1
+      local word=source:sub(start,last)
+      if word=="function" then parameters=true end
+      inject=word=="do" or word=="repeat"
+    else
+      i=i+1
+      if ch==")" and parameters then parameters=false; inject=true end
+    end
+    chunks[#chunks+1]=source:sub(start,i-1)
+    if inject then chunks[#chunks+1]=" "..name.."(); " end
+  end
+  chunks[#chunks+1]="\nend end"
+  local factory,why=load(table.concat(chunks),"@"..path,"t",env)
+  if not factory then return nil,why end
+  return factory()(checkpoint)
+end
+]=],
   }
   local swapped={}
   local ok,err=pcall(function()
@@ -4748,5 +4992,14 @@ if read(root.."/version")~=version or args[1]=="--install" or not fs.exists(root
 end
 shell.setAlias("jpkg","/juzeppe/bin/jpkg.lua")
 shell.setAlias("juznet","/juzeppe/bin/juznet.lua")
+if args[1]=="--autostart" then
+  local boot='assert(loadfile("/juzeppe/start.lua","t",_ENV))()\n'
+  if fs.exists("/startup.lua") and read("/startup.lua")~=boot or fs.exists("/startup") then
+    printError("Existing startup found. To start JuzeppeOS, call /juzeppe/start.lua from it.")
+    return
+  end
+  write("/startup.lua",boot)
+  print("JuzeppeOS will start on boot.")
+end
 if args[1]=="--install-only" then return end
-shell.run("/juzeppe/start.lua")
+return assert(loadfile("/juzeppe/start.lua","t",_ENV))()

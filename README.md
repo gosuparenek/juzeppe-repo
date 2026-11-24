@@ -1,6 +1,6 @@
 # JuzeppeOS Package Repository
 
-Готовый статический сайт и HTTP-репозиторий для JuzeppeOS 0.6.4. Содержимое можно разместить на GitHub Pages или в любом каталоге Nginx; серверный код не требуется.
+Готовый статический сайт и HTTP-репозиторий для JuzeppeOS 0.8.0. Содержимое можно разместить на GitHub Pages или в любом каталоге Nginx; серверный код не требуется.
 
 ## GitHub Pages
 
@@ -19,7 +19,7 @@ https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pag
 
 ## Подключение JuzeppeOS
 
-В JuzeppeOS 0.6.4 репозиторий уже настроен установщиком. Открой магазин приложений или введи в терминале:
+В JuzeppeOS 0.8.0 репозиторий уже настроен установщиком. Открой магазин приложений или введи в терминале:
 
     jpkg refresh
     jpkg install office
