@@ -23,6 +23,29 @@
       "short_ru": "Счёт",
       "author": "Juzeppe",
       "package": "packages/calculator.juz"
+    },
+    {
+      "id": "office",
+      "name": "Juzeppe Office",
+      "name_ru": "Juzeppe Office",
+      "description": "Documents, tables, text colors, symbols and printing",
+      "description_ru": "Документы, таблицы, цветной текст, символы и печать",
+      "version": "1.0.0",
+      "api": 1,
+      "entry": "main.lua",
+      "order": 100,
+      "icon": [
+        "111110",
+        "100010",
+        "111110",
+        "101110",
+        "101010",
+        "111110"
+      ],
+      "short": "Office",
+      "short_ru": "Офис",
+      "author": "Juzeppe",
+      "package": "packages/office.juz"
     }
   ]
 }
