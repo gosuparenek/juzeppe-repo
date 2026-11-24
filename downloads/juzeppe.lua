@@ -1,7 +1,7 @@
--- JuzeppeOS 0.6.3 Sandstone installer / launcher
+-- JuzeppeOS 0.6.4 Sandstone installer / launcher
 local args={...}
 local root="/juzeppe"
-local version="0.6.3"
+local version="0.6.4"
 local function read(path)
   if not fs.exists(path) or fs.isDir(path) then return nil end
   local f=fs.open(path,"r")
@@ -198,7 +198,7 @@ return {refresh=false,draw=function(c)
   local P=c.colors
   c.text(2,1,"J U Z E P P E  /  OS",P.accent)
   c.text(2,3,"Sandstone Edition")
-  c.text(2,4,"Version 0.6.3 / API 1")
+  c.text(2,4,"Version 0.6.4 / API 1")
   c.text(2,5,"CraftOS / CC: Tweaked")
   c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
   c.status("Designed for Juzeppe")
@@ -212,7 +212,7 @@ end}
   "name_ru": "Об ОС",
   "description": "System",
   "description_ru": "Система",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "api": 1,
   "entry": "main.lua",
   "order": 8,
@@ -1154,7 +1154,7 @@ end}
   "name_ru": "Магазин",
   "description": "Packages",
   "description_ru": "Пакеты",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "api": 1,
   "entry": "main.lua",
   "order": 5,
@@ -4264,7 +4264,7 @@ return M
   "Interrupted": "Прервано",
   "Could not save message": "Не удалось сохранить сообщение",
   "Network changed": "Сеть изменена",
-  "Version 0.6.3 / API 1": "Версия 0.6.3 / API 1"
+  "Version 0.6.4 / API 1": "Версия 0.6.4 / API 1"
 }
 ]=],
     ["system/session.lua"]=[=[
@@ -4399,8 +4399,9 @@ function M.write(path,data)
 end
 function M.decode(data)
   if type(data)~="string" then return nil,"Missing JSON" end
-  local ok,result=pcall(textutils.unserializeJSON,data)
-  if not ok or type(result)~="table" then return nil,"Invalid JSON" end
+  local ok,result,decodeError=pcall(textutils.unserializeJSON,data)
+  if not ok then return nil,tostring(result) end
+  if type(result)~="table" then return nil,decodeError or "Invalid JSON" end
   return result
 end
 function M.json(path)
