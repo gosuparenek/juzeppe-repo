@@ -1,0 +1,27 @@
+{
+  "manifest": {
+    "id": "calculator",
+    "name": "Calculator",
+    "name_ru": "Калькулятор",
+    "description": "Math",
+    "description_ru": "Расчёты",
+    "version": "1.0.0",
+    "api": 1,
+    "entry": "main.lua",
+    "order": 99,
+    "icon": [
+      "111111",
+      "100001",
+      "111111",
+      "101101",
+      "100001",
+      "111111"
+    ],
+    "short": "Calc",
+    "short_ru": "Счёт",
+    "author": "Juzeppe"
+  },
+  "files": {
+    "main.lua": "local c=...\nlocal P=c.colors\nlocal a,b,result=0,0,\"-\"\nlocal function input(which)\n  c.prompt(which==1 and \"Enter first number\" or \"Enter second number\",tostring(which==1 and a or b),function(value)\n    local n=tonumber(value)\n    if not n then c.status(\"Invalid number\"); return end\n    if which==1 then a=n else b=n end\n  end)\nend\nlocal function calc(op)\n  if op==\"+\" then result=a+b\n  elseif op==\"-\" then result=a-b\n  elseif op==\"*\" then result=a*b\n  elseif op==\"/\" then\n    if b==0 then c.status(\"Division by zero\"); return end\n    result=a/b\n  end\n  c.status(\"\")\nend\nreturn {draw=function(ui)\n  ui.raw(1,1,ui.tr(\"Number 1\")..\": \"..a)\n  ui.button(ui.width-8,1,\" Enter \",function() input(1) end)\n  ui.raw(1,2,ui.tr(\"Number 2\")..\": \"..b)\n  ui.button(ui.width-8,2,\" Enter \",function() input(2) end)\n  for i,op in ipairs({\"+\",\"-\",\"*\",\"/\"}) do\n    local operation=op\n    ui.button(1+(i-1)*5,4,\" \"..op..\" \",function() calc(operation) end)\n  end\n  ui.rect(1,6,ui.width,1,P.tint)\n  ui.raw(1,6,ui.tr(\"Result\")..\": \"..tostring(result),P.ink,P.tint)\nend}\n"
+  }
+}

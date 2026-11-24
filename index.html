@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Официальный репозиторий приложений JuzeppeOS для CC: Tweaked и CraftOS-PC.">
+  <meta name="theme-color" content="#533525">
+  <title>JuzeppeOS — Репозиторий</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <div class="wrap header-inner">
+      <a href="./" class="brand" aria-label="JuzeppeOS, главная"><span class="mark">J</span><span>Juzeppe<span class="os">OS</span><small>REPOSITORY</small></span></a>
+      <nav aria-label="Навигация"><a href="#catalog">Приложения</a><a href="#connect">Подключение</a><a href="index.json" class="endpoint-link">index.json ↗</a></nav>
+    </div>
+  </header>
+  <main class="wrap">
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="dot"></span> Стабильная версия 0.6.1</div>
+        <h1>Приложения для<br>твоего <em>города.</em></h1>
+        <p>Официальный каталог пакетов JuzeppeOS. Установи ОС на компьютер CC: Tweaked, подключи репозиторий и загружай приложения прямо в Minecraft.</p>
+        <div class="actions"><a class="button primary" href="downloads/juzeppe.lua" download="juzeppe.lua">Скачать JuzeppeOS ↓</a><a class="button secondary" href="#catalog">Открыть каталог</a></div>
+        <div class="compat">CC: Tweaked · CraftOS-PC · API 1</div>
+      </div>
+      <figure class="screen">
+        <div class="screen-bar"><span>JUZEPPE.OS</span><span>• • •</span></div>
+        <img src="assets/desktop.png" alt="Рабочий стол и файловый менеджер JuzeppeOS" width="620" height="350">
+        <figcaption>Sandstone · Рабочее пространство</figcaption>
+      </figure>
+    </section>
+    <section id="connect" class="connect">
+      <div class="connect-intro"><h2>Подключи репозиторий</h2><p>В терминале JuzeppeOS выполни эти команды.</p></div>
+      <div class="terminal"><div class="terminal-top"><span>TERMINAL</span><button type="button" class="copy" data-copy="jpkg repo https://repo.juzeppe.icu&#10;jpkg refresh">Копировать</button></div><pre><span>$</span> jpkg repo https://repo.juzeppe.icu
+<span>$</span> jpkg refresh</pre></div>
+    </section>
+    <section id="catalog" class="catalog">
+      <div class="section-head"><div><h2>Каталог приложений</h2><p id="catalog-status" role="status" aria-live="polite">Загрузка каталога…</p></div><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Поиск приложений" aria-label="Поиск приложений"></label></div>
+      <div class="cards" id="packages"></div>
+      <noscript><p>Для просмотра интерактивного каталога включите JavaScript. Доступно напрямую: <a href="index.json">index.json</a>, <a href="packages/calculator.juz">calculator.juz</a>.</p></noscript>
+    </section>
+  </main>
+  <footer class="footer"><div class="wrap footer-inner"><span>JUZEPPE OS / REPOSITORY</span><span>Создано для мира Juzeppe</span><a href="index.json">JSON API ↗</a></div></footer>
+</body>
+</html>

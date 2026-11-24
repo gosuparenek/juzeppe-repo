@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "packages": [
+    {
+      "id": "calculator",
+      "name": "Calculator",
+      "name_ru": "Калькулятор",
+      "description": "Math",
+      "description_ru": "Расчёты",
+      "version": "1.0.0",
+      "api": 1,
+      "entry": "main.lua",
+      "order": 99,
+      "icon": [
+        "111111",
+        "100001",
+        "111111",
+        "101101",
+        "100001",
+        "111111"
+      ],
+      "short": "Calc",
+      "short_ru": "Счёт",
+      "author": "Juzeppe",
+      "package": "packages/calculator.juz"
+    }
+  ]
+}
