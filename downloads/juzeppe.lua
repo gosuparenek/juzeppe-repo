@@ -1,7 +1,7 @@
--- JuzeppeOS 0.6.4 Sandstone installer / launcher
+-- JuzeppeOS 0.6.5 Sandstone installer / launcher
 local args={...}
 local root="/juzeppe"
-local version="0.6.4"
+local version="0.6.5"
 local function read(path)
   if not fs.exists(path) or fs.isDir(path) then return nil end
   local f=fs.open(path,"r")
@@ -198,7 +198,7 @@ return {refresh=false,draw=function(c)
   local P=c.colors
   c.text(2,1,"J U Z E P P E  /  OS",P.accent)
   c.text(2,3,"Sandstone Edition")
-  c.text(2,4,"Version 0.6.4 / API 1")
+  c.text(2,4,"Version 0.6.5 / API 1")
   c.text(2,5,"CraftOS / CC: Tweaked")
   c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
   c.status("Designed for Juzeppe")
@@ -212,7 +212,7 @@ end}
   "name_ru": "Об ОС",
   "description": "System",
   "description_ru": "Система",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "api": 1,
   "entry": "main.lua",
   "order": 8,
@@ -1154,7 +1154,7 @@ end}
   "name_ru": "Магазин",
   "description": "Packages",
   "description_ru": "Пакеты",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "api": 1,
   "entry": "main.lua",
   "order": 5,
@@ -1674,12 +1674,7 @@ end
 local function button(list,x,y,key,fn,bg,fg)
   return btn(list,x,y,locale.text(key),fn,bg,fg)
 end
-local function contains(rect,x,y)
-  return rect and x>=rect.x and x<rect.x+rect.w and y>=rect.y and y<rect.y+rect.h
-end
-local function locate(list,x,y)
-  for i=#list,1,-1 do if contains(list[i],x,y) then return list[i] end end
-end
+local contains,locate=assert(loadfile("/juzeppe/system/hit-test.lua","t",_ENV))()
 local function clock()
   local m=math.floor((os.time()%24)*60)
   return string.format("%02d:%02d",math.floor(m/60),m%60)
@@ -3488,6 +3483,49 @@ function M.new(options)
 end
 return M
 ]=],
+    ["system/download.lua"]=[=[
+return function(url,limit)
+  if not http or not http.get then return nil,"HTTP is disabled" end
+  local ok,handle,err,failed=pcall(http.get,url,nil,true)
+  if not ok then return nil,tostring(handle) end
+  if not handle then
+    if failed then failed.close() end
+    return nil,err or "Download failed"
+  end
+  local readOK,bytes=pcall(handle.readAll)
+  handle.close()
+  if not readOK then return nil,tostring(bytes) end
+  if type(bytes)~="string" then return nil,"Empty HTTP response" end
+  if #bytes>limit then return nil,"Download exceeds limit" end
+  return (bytes:gsub("%z+$",""))
+end
+]=],
+    ["system/catalog.lua"]=[=[
+return function(validate,relative)
+local function catalog(index,base)
+  if type(index)~="table" or index.format~=1 or type(index.packages)~="table" then return nil,"Invalid catalog" end
+  local result,seen={},{}
+  for _,item in ipairs(index.packages) do
+    if validate(item) and relative(item.package or "") and item.package:match("%.juz$") and not seen[item.id] then
+      item.source=base
+      result[#result+1]=item
+      seen[item.id]=true
+    end
+  end
+  return result
+end
+return catalog
+end
+]=],
+    ["system/hit-test.lua"]=[=[
+local function contains(rect,x,y)
+  return rect and x>=rect.x and x<rect.x+rect.w and y>=rect.y and y<rect.y+rect.h
+end
+local function locate(list,x,y)
+  for i=#list,1,-1 do if contains(list[i],x,y) then return list[i] end end
+end
+return contains,locate
+]=],
     ["system/packages.lua"]=[=[
 local U=assert(loadfile("/juzeppe/system/util.lua","t",_ENV))()
 local M={api=1,root="/juzeppe",limit=512*1024}
@@ -3651,36 +3689,9 @@ function M.setRepository(url)
   if url~="" and not url:match("^https?://[^%s]+$") then return nil,"Use an http(s) URL" end
   return U.write(config,url=="" and "local" or url)
 end
-local function get(url)
-  if not http or not http.get then return nil,"HTTP is disabled" end
-  local ok,handle,err=pcall(http.get,url,nil,true)
-  if not ok then return nil,tostring(handle) end
-  if not handle then return nil,err or "Download failed" end
-  local result={}
-  local count=0
-  while true do
-    local chunk=handle.read(8192)
-    if not chunk then break end
-    if type(chunk)=="number" then chunk=string.char(chunk) end
-    count=count+#chunk
-    if count>M.limit then handle.close(); return nil,"Download exceeds limit" end
-    result[#result+1]=chunk
-  end
-  handle.close()
-  return table.concat(result)
-end
-local function catalog(index,base)
-  if type(index)~="table" or index.format~=1 or type(index.packages)~="table" then return nil,"Invalid catalog" end
-  local result,seen={},{}
-  for _,item in ipairs(index.packages) do
-    if M.validateManifest(item) and relative(item.package or "") and item.package:match("%.juz$") and not seen[item.id] then
-      item.source=base
-      result[#result+1]=item
-      seen[item.id]=true
-    end
-  end
-  return result
-end
+local download=assert(loadfile("/juzeppe/system/download.lua","t",_ENV))()
+local function get(url) return download(url,M.limit) end
+local catalog=assert(loadfile("/juzeppe/system/catalog.lua","t",_ENV))()(M.validateManifest,relative)
 function M.catalog(refresh)
   local base=M.repository()
   if base=="" then return catalog(U.json(M.root.."/repo/index.json"),"local") end
@@ -4264,7 +4275,7 @@ return M
   "Interrupted": "Прервано",
   "Could not save message": "Не удалось сохранить сообщение",
   "Network changed": "Сеть изменена",
-  "Version 0.6.4 / API 1": "Версия 0.6.4 / API 1"
+  "Version 0.6.5 / API 1": "Версия 0.6.5 / API 1"
 }
 ]=],
     ["system/session.lua"]=[=[
