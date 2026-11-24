@@ -1086,8 +1086,9 @@ local function draw(c)
 
   c.rect(1,3,w,1,P.tint)
   c.button(1,3,tr(" Search "," Поиск "),search,P.deep,P.paper)
+  button(11,3,tr(" File "," Файл "),7,installFile,false)
   local queryText=query=="" and tr("All applications","Все приложения") or query
-  c.raw(11,3,queryText,P.muted,P.tint)
+  c.raw(20,3,queryText,P.muted,P.tint)
 
   local count=math.max(1,math.floor((h-7)/2))
   scroll=math.max(0,math.min(scroll,math.max(0,#visible-count)))
