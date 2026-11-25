@@ -29,6 +29,19 @@ public final class MusicSmoke {
             var live = MusicCatalog.search("Кино Кукушка");
             System.out.println("Live Muzmos catalog result count: " + live.size());
             if (live.isEmpty()) throw new AssertionError("Live search returned no tracks");
+            boolean[] streamed = {false};
+            try (var input = MusicCatalog.audio(live.get(0))) {
+                try {
+                    MusicDecoder.decode(input, samples -> {
+                        streamed[0] = samples.length > 0;
+                        throw new InterruptedException("Smoke test complete");
+                    });
+                } catch (InterruptedException expected) {
+                    if (!streamed[0]) throw expected;
+                }
+            }
+            if (!streamed[0]) throw new AssertionError("Live track produced no audio");
+            System.out.println("Verified first chunk of live MP3 stream");
         }
     }
 }

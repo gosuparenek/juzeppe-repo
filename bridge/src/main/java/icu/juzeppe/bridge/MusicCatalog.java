@@ -23,7 +23,7 @@ final class MusicCatalog {
 
     static List<Track> search(String query) throws IOException {
         URI url = URI.create(ROOT + "/search/?q=" + URLEncoder.encode(query, StandardCharsets.UTF_8));
-        try (InputStream in = open(url)) {
+        try (InputStream in = open(url, false)) {
             byte[] bytes = in.readNBytes(MAX_HTML + 1);
             if (bytes.length > MAX_HTML) throw new IOException("Catalog response too large");
             return parse(new String(bytes, StandardCharsets.UTF_8));
@@ -69,27 +69,41 @@ final class MusicCatalog {
 
     static InputStream audio(Track track) throws IOException {
         if (!isAudio(track.audio())) throw new IOException("Invalid catalog audio URL");
-        return open(track.audio());
+        return open(track.audio(), true);
     }
 
-    private static InputStream open(URI uri) throws IOException {
-        if (!isOrigin(uri)) throw new IOException("Invalid catalog host");
-        HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
-        connection.setInstanceFollowRedirects(false);
-        connection.setConnectTimeout(8000);
-        connection.setReadTimeout(12000);
-        connection.setRequestProperty("User-Agent", "JuzeppeOS Music/1.0");
-        try {
-            int status = connection.getResponseCode();
-            if (status != 200) throw new IOException("Muzmos HTTP " + status);
-            return new BufferedInputStream(connection.getInputStream()) {
-                @Override public void close() throws IOException {
-                    try { super.close(); } finally { connection.disconnect(); }
+    private static InputStream open(URI uri, boolean audio) throws IOException {
+        for (int redirect = 0; redirect <= 3; redirect++) {
+            String path = uri.getPath();
+            if (!isOrigin(uri) || (audio ? !isAudio(uri) :
+                    path == null || !(path.equals("/search") || path.startsWith("/search/")))) {
+                throw new IOException("Unexpected Muzmos redirect destination");
+            }
+            HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(12000);
+            connection.setRequestProperty("User-Agent", "JuzeppeOS Music/1.0");
+            try {
+                int status = connection.getResponseCode();
+                if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
+                    String location = connection.getHeaderField("Location");
+                    connection.disconnect();
+                    if (location == null) throw new IOException("Muzmos redirect without location");
+                    uri = uri.resolve(location);
+                    continue;
                 }
-            };
-        } catch (IOException e) {
-            connection.disconnect();
-            throw e;
+                if (status != 200) throw new IOException("Muzmos HTTP " + status);
+                return new BufferedInputStream(connection.getInputStream()) {
+                    @Override public void close() throws IOException {
+                        try { super.close(); } finally { connection.disconnect(); }
+                    }
+                };
+            } catch (IOException | IllegalArgumentException e) {
+                connection.disconnect();
+                throw new IOException(e.getMessage(), e);
+            }
         }
+        throw new IOException("Too many Muzmos redirects");
     }
 }
