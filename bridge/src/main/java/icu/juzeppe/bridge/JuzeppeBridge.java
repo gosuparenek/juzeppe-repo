@@ -18,8 +18,6 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 @Mod("juzeppe_bridge")
 public final class JuzeppeBridge {
-    static final int MAX_DISTANCE = 24;
-
     public JuzeppeBridge(IEventBus modBus) {
         modBus.addListener(this::setup);
         NeoForge.EVENT_BUS.addListener(this::registerCommands);
@@ -54,10 +52,6 @@ public final class JuzeppeBridge {
             source.sendFailure(Component.literal("No Create Stock Ticker at the second position."));
             return 0;
         }
-        if (!near(computer, ticker)) {
-            source.sendFailure(Component.literal("Ticker must be within 24 blocks of the computer."));
-            return 0;
-        }
         Bindings.get(level).bind(computer, ticker);
         source.sendSuccess(() -> Component.literal("Juzeppe Bridge: terminal bound to " + ticker.toShortString()), true);
         return 1;
@@ -74,7 +68,4 @@ public final class JuzeppeBridge {
         return 1;
     }
 
-    static boolean near(BlockPos computer, BlockPos ticker) {
-        return computer.distSqr(ticker) <= MAX_DISTANCE * MAX_DISTANCE;
-    }
 }

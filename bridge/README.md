@@ -1,10 +1,10 @@
-# Juzeppe Bridge 0.2.0
+# Juzeppe Bridge 0.2.1
 
 Экспериментальный серверный мод для Minecraft 1.21.1 / NeoForge, Create 6.0.7+ и CC: Tweaked. Открывает оригинальное меню заказа Create для текущего игрока, использующего терминал CC:T. Новых блоков, клиентских пакетов и экранов не добавляет.
 
 ## Сборка
 
-Java 21 и Gradle 8.14.3. В этом каталоге выполните `gradle build`. Артефакт: `build/libs/juzeppe-bridge-0.2.0.jar`. GitHub Actions собирает мод автоматически.
+Java 21 и Gradle 8.14.3. В этом каталоге выполните `gradle build`. Артефакт: `build/libs/juzeppe-bridge-0.2.1.jar`. GitHub Actions собирает мод автоматически.
 
 ## Установка
 
@@ -14,7 +14,7 @@ Java 21 и Gradle 8.14.3. В этом каталоге выполните `gradl
 
        /juzeppebridge bind <x компьютера> <y> <z> <x тикера> <y> <z>
 
-   Например: `/juzeppebridge bind 100 64 100 100 61 100`. Максимум 24 блока от компьютера. Команда unbind с координатами компьютера отменяет привязку.
+   Например: `/juzeppebridge bind 100 64 100 100 61 100`. Привязка сохраняется в пределах текущего измерения. Команда unbind с координатами компьютера отменяет привязку.
 4. Откройте именно экран компьютера в Minecraft. В Lua-терминале выполните `juzeppebridge.openStock()`. В обновлённом Stock также есть кнопка GUI. Если несколько игроков одновременно открыли один компьютер, операция предлагается только после выхода остальных.
 
 Сохраняется штатная проверка прав Create. Мод не читает произвольные координаты из Lua, не открывает меню произвольным игрокам и не отправляет заказ. Если в основной руке Shopping List, её сначала нужно убрать, чтобы обращение к штатному обработчику не стало покупкой. Интерфейс Create привязан к реальному блоку: удалённый незагруженный тикер не поддерживается.
@@ -25,4 +25,4 @@ Java 21 и Gradle 8.14.3. В этом каталоге выполните `gradl
 
 ## Wireless
 
-Stock Host 1.1.0: use an adjacent ticker and wireless modem, with Bridge 0.2.0 installed on server. Pair Stock 1.3.0 via Link (host computer ID). GUI requests a short-lived invitation from the host, then opens the existing Create ordering menu after checking the active player, Create permissions and loaded ticker. Maximum 32 blocks from player, same dimension. No admin command required for this mode.
+Stock Host 1.1.0: use an adjacent ticker and wireless modem, with Bridge 0.2.1 installed on server. Pair Stock 1.3.0 via Link (host computer ID). GUI requests a short-lived invitation from the host, then opens the existing Create ordering menu after checking the active player, Create permissions and loaded ticker. Bridge has no fixed distance cap. The ticker and keeper must be loaded on the player's client in the same dimension. Create itself validates the order distance; for reliable ordering on Create 6.0.8, keep an intermediate ticker within 20 blocks of the player. Bridge warns in chat when opening farther away. No admin command required for this mode.

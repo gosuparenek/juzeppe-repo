@@ -14,6 +14,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
@@ -108,12 +109,7 @@ public final class StockApi implements ILuaAPI {
             }
         }
         if (target == null) return fail("No ticker bound to this computer");
-        if (!wireless && !JuzeppeBridge.near(position, target)) return fail("Ticker is too far away");
-        double x = target.getX() + 0.5;
-        double y = target.getY() + 0.5;
-        double z = target.getZ() + 0.5;
-        if (viewer.distanceToSqr(x, y, z) > 32 * 32 ||
-            !viewer.getChunkTrackingView().contains(new ChunkPos(target)) ||
+        if (!viewer.getChunkTrackingView().contains(new ChunkPos(target)) ||
             !level.hasChunkAt(target)) return fail("Ticker is outside the player's loaded area");
         if (!(level.getBlockEntity(target) instanceof StockTickerBlockEntity ticker) ||
             ticker.isRemoved()) return fail("Ticker is missing");
@@ -123,6 +119,11 @@ public final class StockApi implements ILuaAPI {
         // Do not let this menu-only operation accidentally execute that path.
         if (SHOPPING_LIST.equals(BuiltInRegistries.ITEM.getKey(viewer.getMainHandItem().getItem()))) {
             return fail("Put the shopping list away before opening the stock menu");
+        }
+        // Create itself validates order distance. Warn before handing off to its menu.
+        if (!target.closerThan(viewer.blockPosition(), 20)) {
+            viewer.sendSystemMessage(Component.literal(
+                "Juzeppe Bridge: this ticker is far away. Create may reject orders; use a closer ticker to order."));
         }
         var previousMenu = viewer.containerMenu;
         boolean handled = StockTickerInteractionHandler.interactWithLogisticsManagerAt(viewer, level, target);
