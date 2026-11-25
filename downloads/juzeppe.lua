@@ -1,7 +1,7 @@
--- JuzeppeOS 0.8.0 Sandstone installer / launcher
+-- JuzeppeOS 0.8.1 Sandstone installer / launcher
 local args={...}
 local root="/juzeppe"
-local version="0.8.0"
+local version="0.8.1"
 local function read(path)
   if not fs.exists(path) or fs.isDir(path) then return nil end
   local f=fs.open(path,"r")
@@ -235,7 +235,7 @@ local function launch()
   if k.processes[pid] then desktop=pid end
 end
 local ok,err=xpcall(function()
-  journal("kernel","boot","0.8.0")
+  journal("kernel","boot","0.8.1")
   _G.__juzeppe_active_network=network
   k.spawn("network",function()
     network:start()
@@ -266,7 +266,7 @@ return {refresh=false,draw=function(c)
   local P=c.colors
   c.text(2,1,"J U Z E P P E  /  OS",P.accent)
   c.text(2,3,"Sandstone Edition")
-  c.text(2,4,"Version 0.8.0 / API 1")
+  c.text(2,4,"Version 0.8.1 / API 1")
   c.text(2,5,"CraftOS / CC: Tweaked")
   c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
   c.status("Designed for Juzeppe")
@@ -280,7 +280,7 @@ end}
   "name_ru": "Об ОС",
   "description": "System",
   "description_ru": "Система",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "api": 1,
   "entry": "main.lua",
   "order": 8,
@@ -1220,7 +1220,7 @@ end}
   "name_ru": "Магазин",
   "description": "Packages",
   "description_ru": "Пакеты",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "api": 1,
   "entry": "main.lua",
   "order": 5,
@@ -2081,7 +2081,7 @@ local function drawBar()
   local available=clockX-x
   if available<4 then return end
   if #tasks==0 then
-    if available>=6 then line(x+1,H,"v0.8.0",P.tint,P.ink) end
+    if available>=6 then line(x+1,H,"v0.8.1",P.tint,P.ink) end
     return
   end
   local count=math.max(1,math.floor(available/9))
@@ -2530,7 +2530,7 @@ local function fileTransfer(transfer)
   end
 end
 local function run()
-  journal("desktop","start","0.8.0")
+  journal("desktop","start","0.8.1")
   refresh()
   pollDesktop()
   local netRevision=network.revision
@@ -4118,7 +4118,7 @@ function M.new(host,P,locale,config)
     local changed=false
     for i=#self.jobs,1,-1 do
       local job=self.jobs[i]
-      if job and job.owner.trusted and not job.finished and (not job.filter or job.filter==event) then
+      if job and not job.finished and (job.owner.trusted or (event=="task_complete" and job.filter==event)) and (not job.filter or job.filter==event) then
         self:resumeJob(job,event,...); changed=true
       end
 
@@ -4227,6 +4227,15 @@ function M.new(host,P,locale,config)
   function self:event(win,event,...)
     if event==win.sliceEvent and not win.closed then
       if win.worker and win.worker.filter==event then self:resumeWorker(win); return true end
+      return false
+    end
+    -- CC peripherals may suspend until their main-thread task completes.
+    -- Resume only the waiting call. Never broadcast host completions to app handlers.
+    if not win.trusted and event=="task_complete" then
+      if win.worker and win.worker.filter==event then
+        self:resumeWorker(win,event,...)
+        return true
+      end
       return false
     end
     if not win.trusted and not inputEvent(event) and event~='term_resize' and event~='terminate' then return false end
@@ -4556,7 +4565,7 @@ return M
   "Interrupted": "Прервано",
   "Could not save message": "Не удалось сохранить сообщение",
   "Network changed": "Сеть изменена",
-  "Version 0.8.0 / API 1": "Версия 0.8.0 / API 1"
+  "Version 0.8.1 / API 1": "Версия 0.8.1 / API 1"
 }
 ]=],
     ["system/session.lua"]=[=[
