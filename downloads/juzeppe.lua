@@ -1,7 +1,7 @@
--- JuzeppeOS 0.9.0 Sandstone installer / launcher
+-- JuzeppeOS 0.9.1 Sandstone installer / launcher
 local args={...}
 local root="/juzeppe"
-local version="0.9.0"
+local version="0.9.1"
 local function read(path)
   if not fs.exists(path) or fs.isDir(path) then return nil end
   local f=fs.open(path,"r")
@@ -241,7 +241,7 @@ local function launch()
   if k.processes[pid] then desktop=pid end
 end
 local ok,err=xpcall(function()
-  journal("kernel","boot","0.9.0")
+  journal("kernel","boot","0.9.1")
   _G.__juzeppe_active_network=network
   k.spawn("network",function()
     network:start()
@@ -276,7 +276,7 @@ return {refresh=false,draw=function(c)
   local P=c.colors
   c.text(2,1,"J U Z E P P E  /  OS",P.accent)
   c.text(2,3,"Sandstone Edition")
-  c.text(2,4,"Version 0.9.0 / API 1")
+  c.text(2,4,"Version 0.9.1 / API 1")
   c.text(2,5,"CraftOS / CC: Tweaked")
   c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
   c.status("Designed for Juzeppe")
@@ -290,7 +290,7 @@ end}
   "name_ru": "Об ОС",
   "description": "System",
   "description_ru": "Система",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "api": 1,
   "entry": "main.lua",
   "order": 8,
@@ -1230,7 +1230,7 @@ end}
   "name_ru": "Магазин",
   "description": "Packages",
   "description_ru": "Пакеты",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "api": 1,
   "entry": "main.lua",
   "order": 5,
@@ -2091,7 +2091,7 @@ local function drawBar()
   local available=clockX-x
   if available<4 then return end
   if #tasks==0 then
-    if available>=6 then line(x+1,H,"v0.9.0",P.tint,P.ink) end
+    if available>=6 then line(x+1,H,"v0.9.1",P.tint,P.ink) end
     return
   end
   local count=math.max(1,math.floor(available/9))
@@ -2540,7 +2540,7 @@ local function fileTransfer(transfer)
   end
 end
 local function run()
-  journal("desktop","start","0.9.0")
+  journal("desktop","start","0.9.1")
   refresh()
   pollDesktop()
   local netRevision=network.revision
@@ -4623,7 +4623,7 @@ return M
   "Interrupted": "Прервано",
   "Could not save message": "Не удалось сохранить сообщение",
   "Network changed": "Сеть изменена",
-  "Version 0.9.0 / API 1": "Версия 0.9.0 / API 1"
+  "Version 0.9.1 / API 1": "Версия 0.9.1 / API 1"
 }
 ]=],
     ["system/session.lua"]=[=[
@@ -5147,7 +5147,7 @@ return function()
 end
 ]=],
     ["system/phone.lua"]=[=[
--- What'sJuz phone service. One wireless channel, no central server.
+-- What'sJuz phone service. Wired and wireless modems, no central server.
 local util=dofile("/juzeppe/system/util.lua")
 local audioRequire=require
 if not audioRequire then
@@ -5166,7 +5166,8 @@ return function(notify)
   local id=os.getComputerID()
   local session=tostring(os.epoch("utc"))..":"..id..":"..math.random(1000000)
   local enabled,activated=false,false
-  local number,modem,owned,speaker,mic
+  local number,speaker,mic
+  local modems={}
   local peers,ended={},{}
   local call,notice
   local serial=0
@@ -5184,11 +5185,20 @@ return function(notify)
     return pcall(peripheral.call,name,method,...)
   end
   local function send(kind,peer,fields)
-    if not modem or not number then return false end
+    if not next(modems) or not number then return false end
     local p=fields or {}
     p.protocol,p.kind,p.from,p.number,p.session=PROTOCOL,kind,id,number,session
-    if peer then p.to,p.forSession=peer.id,peer.session end
-    return invoke(modem,"transmit",CHANNEL,CHANNEL,p)
+    if peer then
+      p.to,p.forSession=peer.id,peer.session
+      local route=peers[peer.id]
+      if route and route.session==peer.session and modems[route.side] and
+          invoke(route.side,"transmit",CHANNEL,CHANNEL,p) then return true end
+    end
+    local sent=false
+    for side in pairs(modems) do
+      if invoke(side,"transmit",CHANNEL,CHANNEL,p) then sent=true end
+    end
+    return sent
   end
   local function hello()
     local label=os.getComputerLabel() or ("Terminal "..id)
@@ -5232,36 +5242,51 @@ return function(notify)
     info(reason)
   end
   local function closeModem()
-    if modem and owned then invoke(modem,"close",CHANNEL) end
-    modem,owned=nil,false
+    for side,port in pairs(modems) do
+      if port.owned then invoke(side,"close",CHANNEL) end
+    end
+    modems={}
   end
   local function scan()
     local list=peripheral.getNames()
     table.sort(list)
-    local selected,newSpeaker,newMic=nil,nil,nil
+    local present,newSpeaker,newMic={},nil,nil
+    local changed=false
     for _,name in ipairs(list) do
-      local ok,kind=pcall(peripheral.getType,name)
-      if ok then
-        if kind=="modem" then
-          local success,wireless=invoke(name,"isWireless")
-          if success and wireless and not selected then selected=name end
-        elseif kind=="speaker" and not newSpeaker then newSpeaker=name
-        elseif kind=="microphone" and SIDES[name] and not newMic then newMic=name end
+      -- Physical devices only: a cable must never select another phone's speaker or modem.
+      if SIDES[name] then
+        local ok,kind=pcall(peripheral.getType,name)
+        if ok then
+          if kind=="modem" then
+            local checked,wireless=invoke(name,"isWireless")
+            local opened,already=invoke(name,"isOpen",CHANNEL)
+            if checked and opened and (already or invoke(name,"open",CHANNEL)) then
+              local old=modems[name]
+              present[name]={owned=old and old.owned or not already,wireless=wireless}
+              if not old or old.wireless~=wireless or not already then changed=true end
+            end
+          elseif kind=="speaker" and not newSpeaker then newSpeaker=name
+          elseif kind=="microphone" and not newMic then newMic=name end
+        end
       end
     end
     if mic~=newMic and call then call.muted=true; call.micReady=false end
     if speaker~=newSpeaker and call then clearAudio() end
     speaker,mic=newSpeaker,newMic
-    if modem~=selected then
-      if call then finish("Connection changed",true) end
-      closeModem()
-      peers={}
-      if selected then
-        local ok,already=invoke(selected,"isOpen",CHANNEL)
-        if ok and (already or invoke(selected,"open",CHANNEL)) then
-          modem,owned=selected,not already
-          hello()
-        end
+    for side,port in pairs(modems) do
+      if not present[side] then
+        if port.owned then invoke(side,"close",CHANNEL) end
+        changed=true
+      end
+    end
+    modems=present
+    if changed then
+      if not next(modems) then
+        if call then finish("Connection lost",false) end
+        peers={}
+      else
+        for _,peer in pairs(peers) do if not modems[peer.side] then peer.side=nil end end
+        hello()
       end
     end
     nextScan=os.clock()+2
@@ -5300,11 +5325,11 @@ return function(notify)
       c.audioSize=c.audioSize-#table.remove(c.audio,1)
     end
   end
-  local function receive(p)
+  local function receive(p,side)
     if not validPacket(p) then return end
     if p.kind=="hello" then
       local old=peers[p.from]
-      peers[p.from]={id=p.from,session=p.session,number=p.number,last=os.clock(),
+      peers[p.from]={id=p.from,session=p.session,number=p.number,last=os.clock(),side=side,
         label=type(p.label)=="string" and p.label:sub(1,32):gsub("[%z\1-\31\127]","") or ("Terminal "..p.from)}
       chooseIfConflict()
       if not old or old.session~=p.session then hello() end
@@ -5320,6 +5345,7 @@ return function(notify)
     local peer=peers[p.from]
     if not peer or peer.session~=p.session then return end
     peer.last=os.clock()
+    peer.side=side
     if p.kind=="invite" then
       local previous=ended[p.call]
       if previous and previous.peer==p.from and previous.session==p.session then
@@ -5420,7 +5446,7 @@ return function(notify)
     if now>=nextHello then hello() end
     if not call then return end
     local c=call
-    if not modem then finish("No wireless modem",false); return end
+    if not next(modems) then finish("No modem",false); return end
     if c.state=="active" then
       if now-c.last>8 then finish("Connection lost",false); return end
       if now>=c.nextSignal then signal("alive",c); c.nextSignal=now+1 end
@@ -5437,7 +5463,7 @@ return function(notify)
     enabled=true
     if not number then chooseNumber() end
     save(); scan(); hello()
-    info(modem and ("Ready: "..tostring(number)) or "Connect a wireless modem")
+    info(next(modems) and ("Ready: "..tostring(number)) or "Connect a modem")
   end
   local function command(name,value)
     if name=="initialize" then
@@ -5447,7 +5473,7 @@ return function(notify)
       if call then finish("Offline",true) end
       send("bye"); enabled=false; closeModem(); peers={}; save(); info("Offline")
     elseif name=="dial" then
-      if not enabled or not modem or not number then info("Connect a wireless modem"); return end
+      if not enabled or not next(modems) or not number then info("Connect a modem"); return end
       if call then info("Already in a call"); return end
       local n=tonumber(value)
       if not numberOK(n) or n==number then info("Enter a different two-digit number"); return end
@@ -5488,7 +5514,7 @@ return function(notify)
     local c
     if call then c={state=call.state,number=call.peerNumber,muted=call.muted,
       micReady=call.micReady,seconds=call.connected and math.floor(os.clock()-call.connected) or 0} end
-    return {enabled=enabled,number=number,online=enabled and modem~=nil,peers=list,call=c,
+    return {enabled=enabled,number=number,online=enabled and next(modems)~=nil,peers=list,call=c,
       speaker=speaker~=nil,microphone=mic~=nil,notice=notice or ""}
   end
   function self.run()
@@ -5503,7 +5529,7 @@ return function(notify)
     while true do
       local e,a,b,c,d=os.pullEventRaw()
       if e=="juzeppe_phone_command" then command(a,b)
-      elseif enabled and e=="modem_message" and a==modem and b==CHANNEL and c==CHANNEL then receive(d)
+      elseif enabled and e=="modem_message" and modems[a] and b==CHANNEL and c==CHANNEL then receive(d,a)
       elseif e=="timer" and a==timer then
         tick()
         timer=os.startTimer(call and (call.state=="active" and 0.1 or 0.2) or (enabled and 0.5 or 2))
