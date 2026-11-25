@@ -23,21 +23,25 @@ final class MusicCatalog {
 
     static List<Track> search(String query) throws IOException {
         URI url = URI.create(ROOT + "/search/?q=" + URLEncoder.encode(query, StandardCharsets.UTF_8));
-        try (InputStream in = open(url, false)) {
-            byte[] bytes = in.readNBytes(MAX_HTML + 1);
+        try (Response response = open(url, false)) {
+            byte[] bytes = response.stream().readNBytes(MAX_HTML + 1);
             if (bytes.length > MAX_HTML) throw new IOException("Catalog response too large");
-            return parse(new String(bytes, StandardCharsets.UTF_8));
+            return parse(new String(bytes, StandardCharsets.UTF_8), response.uri());
         }
     }
 
     static List<Track> parse(String html) {
+        return parse(html, URI.create(ROOT + "/"));
+    }
+
+    static List<Track> parse(String html, URI base) {
         List<Track> tracks = new ArrayList<>();
         Set<URI> seen = new HashSet<>();
         // Skip promotional tracks in the page header.
         for (Element e : Jsoup.parse(html).select("a.snd-item[data-track][data-title]")) {
             URI uri;
             try {
-                uri = URI.create(ROOT + "/").resolve(e.attr("data-track"));
+                uri = base.resolve(e.attr("data-track"));
             } catch (IllegalArgumentException ex) {
                 continue;
             }
@@ -76,17 +80,22 @@ final class MusicCatalog {
 
     private static boolean isAudio(URI uri) {
         return isOrigin(uri) && uri.getPath() != null &&
-            uri.getPath().startsWith("/uploads/music/") &&
-            uri.getPath().toLowerCase(java.util.Locale.ROOT).endsWith(".mp3") &&
+            (uri.getPath().startsWith("/uploads/music/") &&
+             uri.getPath().toLowerCase(java.util.Locale.ROOT).endsWith(".mp3") ||
+             uri.getPath().matches("/get/[a-fA-F0-9]{16}\\.mp3")) &&
             uri.normalize().equals(uri) && uri.getQuery() == null && uri.getFragment() == null;
     }
 
     static InputStream audio(Track track) throws IOException {
         if (!isAudio(track.audio())) throw new IOException("Invalid catalog audio URL");
-        return open(track.audio(), true);
+        return open(track.audio(), true).stream();
     }
 
-    private static InputStream open(URI uri, boolean audio) throws IOException {
+    private record Response(URI uri, InputStream stream) implements AutoCloseable {
+        @Override public void close() throws IOException { stream.close(); }
+    }
+
+    private static Response open(URI uri, boolean audio) throws IOException {
         for (int redirect = 0; redirect <= 3; redirect++) {
             if (!isOrigin(uri) || (audio ? !isAudio(uri) : !isSearchPath(uri))) {
                 throw new IOException("Unexpected Muzmos redirect destination");
@@ -106,11 +115,11 @@ final class MusicCatalog {
                     continue;
                 }
                 if (status != 200) throw new IOException("Muzmos HTTP " + status);
-                return new BufferedInputStream(connection.getInputStream()) {
+                return new Response(uri, new BufferedInputStream(connection.getInputStream()) {
                     @Override public void close() throws IOException {
                         try { super.close(); } finally { connection.disconnect(); }
                     }
-                };
+                });
             } catch (IOException | IllegalArgumentException e) {
                 connection.disconnect();
                 throw new IOException(e.getMessage(), e);

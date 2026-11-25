@@ -14,6 +14,12 @@ public final class MusicSmoke {
             """);
         if (tracks.size()!=1 || !tracks.get(0).title().equals("Song & Piano"))
             throw new AssertionError("Catalog markup parse or origin validation");
+        var relative = MusicCatalog.parse("""
+            <a class="snd-item search-track" data-track="/get/1234567890abcdef.mp3"
+               data-title="Result" data-artist="Artist"></a>
+            """, java.net.URI.create("https://queen.muzmos.com/"));
+        if (relative.size()!=1 || !relative.get(0).audio().toString().equals("https://queen.muzmos.com/get/1234567890abcdef.mp3"))
+            throw new AssertionError("Relative search result audio URL");
         long[] count = {0};
         boolean[] nonzero = {false};
         try (var input = Files.newInputStream(Path.of(args[0]))) {
