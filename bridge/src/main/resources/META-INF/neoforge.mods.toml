@@ -4,9 +4,9 @@ license="MIT"
 
 [[mods]]
 modId="juzeppe_bridge"
-version="0.2.1"
+version="0.3.0"
 displayName="Juzeppe Bridge"
-description="Opens Create's native Stock Keeper menu for the current CC: Tweaked terminal user."
+description="Create Stock Keeper integration and public music playback for CC: Tweaked."
 displayTest="IGNORE_SERVER_VERSION"
 
 [[dependencies.juzeppe_bridge]]

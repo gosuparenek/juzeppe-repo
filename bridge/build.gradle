@@ -3,7 +3,7 @@ plugins {
     id 'net.neoforged.moddev' version '2.0.107'
 }
 group = 'icu.juzeppe'
-version = '0.2.1'
+version = '0.3.0'
 base { archivesName = 'juzeppe-bridge' }
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
@@ -22,6 +22,12 @@ neoForge {
     mods { juzeppe_bridge { sourceSet sourceSets.main } }
 }
 dependencies {
+    jarJar(implementation('javazoom:jlayer:1.0.1')) {
+        version { strictly '[1.0.1,1.0.2)'; prefer '1.0.1' }
+    }
+    jarJar(implementation('org.jsoup:jsoup:1.21.2')) {
+        version { strictly '[1.21.2,1.22)'; prefer '1.21.2' }
+    }
     // Create 6.0.8 and CC:T 1.116.1, Minecraft 1.21.1 NeoForge.
     compileOnly 'maven.modrinth:create:88L641Un'
     compileOnly 'maven.modrinth:gu7yAYhd:SQI2qmh5'
@@ -31,4 +37,13 @@ dependencies {
 }
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+}
+
+// A generated tone and synthetic catalog fixture verify the decoder independently of Minecraft.
+tasks.register('musicSmoke', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'icu.juzeppe.bridge.MusicSmoke'
+    args project.findProperty('musicTestFile') ?: ''
+    if (project.hasProperty('liveMusicSearch')) args 'live'
 }

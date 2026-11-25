@@ -105,6 +105,32 @@
         "phone.calls"
       ],
       "package": "packages/whatsjuz.juz"
+    },
+    {
+      "id": "music",
+      "name": "Juzeppe Music",
+      "name_ru": "\u041c\u0443\u0437\u044b\u043a\u0430",
+      "short": "Music",
+      "short_ru": "\u041c\u0443\u0437",
+      "description": "Find and play music from Muzmos",
+      "description_ru": "\u041f\u043e\u0438\u0441\u043a \u0438 \u0432\u043e\u0441\u043f\u0440\u043e\u0438\u0437\u0432\u0435\u0434\u0435\u043d\u0438\u0435 \u043c\u0443\u0437\u044b\u043a\u0438 Muzmos",
+      "version": "1.0.0",
+      "api": 1,
+      "entry": "main.lua",
+      "order": 105,
+      "icon": [
+        "011110",
+        "010010",
+        "010010",
+        "110110",
+        "110110",
+        "000000"
+      ],
+      "author": "Juzeppe",
+      "permissions": [
+        "music.playback"
+      ],
+      "package": "packages/music.juz"
     }
   ]
 }
