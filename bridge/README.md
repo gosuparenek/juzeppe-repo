@@ -26,3 +26,7 @@ Java 21 и Gradle 8.14.3. В этом каталоге выполните `gradl
 ## Wireless
 
 Stock Host 1.1.0: use an adjacent ticker and wireless modem, with Bridge 0.2.1 installed on server. Pair Stock 1.3.0 via Link (host computer ID). GUI requests a short-lived invitation from the host, then opens the existing Create ordering menu after checking the active player, Create permissions and loaded ticker. Bridge has no fixed distance cap. The ticker and keeper must be loaded on the player's client in the same dimension. Create itself validates the order distance; for reliable ordering on Create 6.0.8, keep an intermediate ticker within 20 blocks of the player. Bridge warns in chat when opening farther away. No admin command required for this mode.
+
+## Music (0.3.0)
+
+Music API searches the public Muzmos HTML catalog and decodes MP3 incrementally to mono signed 8-bit PCM at 48 kHz. HTTP and decoding use bounded worker pools, streams have bounded queues, and cancellation/shutdown disposes playback. The mod embeds JLayer and jsoup. JuzeppeOS 0.9.2 and Music 1.0.0 use the API. No client-side Bridge installation or separate external converter is required.

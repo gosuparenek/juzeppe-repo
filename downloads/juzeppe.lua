@@ -1,7 +1,7 @@
--- JuzeppeOS 0.9.1 Sandstone installer / launcher
+-- JuzeppeOS 0.9.2 Sandstone installer / launcher
 local args={...}
 local root="/juzeppe"
-local version="0.9.1"
+local version="0.9.2"
 local function read(path)
   if not fs.exists(path) or fs.isDir(path) then return nil end
   local f=fs.open(path,"r")
@@ -201,6 +201,8 @@ local phone=dofile("/juzeppe/system/phone.lua")(function(msg)
   if desktop then k.send(desktop,"system_notice",msg) end
 end)
 k.phone=phone
+local music=dofile("/juzeppe/system/music.lua")(phone)
+k.music=music
 k.latest=function() return latest end
 function k.install(item)
   if active then return nil,"Another installation is running" end
@@ -241,7 +243,7 @@ local function launch()
   if k.processes[pid] then desktop=pid end
 end
 local ok,err=xpcall(function()
-  journal("kernel","boot","0.9.1")
+  journal("kernel","boot","0.9.2")
   _G.__juzeppe_active_network=network
   k.spawn("network",function()
     network:start()
@@ -256,6 +258,7 @@ local ok,err=xpcall(function()
     while true do stock.event(os.pullEventRaw()) end
   end,function() stock.close() end)
   k.spawn("phone",phone.run,phone.close)
+  k.spawn("music",music.run,music.close)
   launch()
   while k.running do
     local e=table.pack(os.pullEventRaw())
@@ -276,7 +279,7 @@ return {refresh=false,draw=function(c)
   local P=c.colors
   c.text(2,1,"J U Z E P P E  /  OS",P.accent)
   c.text(2,3,"Sandstone Edition")
-  c.text(2,4,"Version 0.9.1 / API 1")
+  c.text(2,4,"Version 0.9.2 / API 1")
   c.text(2,5,"CraftOS / CC: Tweaked")
   c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
   c.status("Designed for Juzeppe")
@@ -290,7 +293,7 @@ end}
   "name_ru": "Об ОС",
   "description": "System",
   "description_ru": "Система",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "api": 1,
   "entry": "main.lua",
   "order": 8,
@@ -1230,7 +1233,7 @@ end}
   "name_ru": "Магазин",
   "description": "Packages",
   "description_ru": "Пакеты",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "api": 1,
   "entry": "main.lua",
   "order": 5,
@@ -2091,7 +2094,7 @@ local function drawBar()
   local available=clockX-x
   if available<4 then return end
   if #tasks==0 then
-    if available>=6 then line(x+1,H,"v0.9.1",P.tint,P.ink) end
+    if available>=6 then line(x+1,H,"v0.9.2",P.tint,P.ink) end
     return
   end
   local count=math.max(1,math.floor(available/9))
@@ -2540,7 +2543,7 @@ local function fileTransfer(transfer)
   end
 end
 local function run()
-  journal("desktop","start","0.9.1")
+  journal("desktop","start","0.9.2")
   refresh()
   pollDesktop()
   local netRevision=network.revision
@@ -3667,7 +3670,7 @@ function M.validateManifest(m)
     local seen={}
     for i,v in pairs(m.permissions) do
       if type(i)~="number" or i%1~=0 or i<1 or i>#m.permissions or
-        (v~="desktop.files" and v~="printer" and v~="clipboard" and v~="stock.read" and v~="stock.remote" and v~="stock.native" and v~="phone.calls") or seen[v] then return nil,"Invalid permission" end
+        (v~="desktop.files" and v~="printer" and v~="clipboard" and v~="stock.read" and v~="stock.remote" and v~="stock.native" and v~="phone.calls" and v~="music.playback") or seen[v] then return nil,"Invalid permission" end
       seen[v]=true
     end
   end
@@ -3992,6 +3995,9 @@ return function(win,c,grants,locale)
   if grants["phone.calls"] then
     api.phone={status=c.phone.status,command=c.phone.command}
   end
+  if grants["music.playback"] then
+    api.music={status=c.music.status,command=c.music.command}
+  end
   if grants.printer then
     local function printer(n) return peripheral.hasType(n,"printer") end
     env.peripheral={hasType=function(n,t) return t=="printer" and printer(n) end,
@@ -4189,6 +4195,7 @@ function M.new(host,P,locale,config)
     if not fs.exists(dataPath) then fs.makeDir(dataPath) end
     local c={
       phone=config.kernel.phone,
+      music=config.kernel.music,
       stockRemote=function(id,native)
         for _,job in ipairs(self.jobs) do
           if job.owner==win and job.thread==coroutine.running() then return config.kernel.stock.read(id,native) end
@@ -4623,7 +4630,7 @@ return M
   "Interrupted": "Прервано",
   "Could not save message": "Не удалось сохранить сообщение",
   "Network changed": "Сеть изменена",
-  "Version 0.9.1 / API 1": "Версия 0.9.1 / API 1"
+  "Version 0.9.2 / API 1": "Версия 0.9.2 / API 1"
 }
 ]=],
     ["system/session.lua"]=[=[
@@ -5544,6 +5551,206 @@ return function(notify)
   function self.close()
     if call then finish("Phone stopped",true) end
     send("bye"); closeModem()
+    if timer then os.cancelTimer(timer) end
+  end
+  return self
+end
+]=],
+    ["system/music.lua"]=[=[
+-- Juzeppe Music: keep playback in a kernel service while the window is closed.
+local SIDES={top=true,bottom=true,left=true,right=true,front=true,back=true}
+return function(phone)
+  local self={}
+  local query,results,searchState,playState="",{},"idle","idle"
+  local notice,artist,title="", "", ""
+  local selected,volume,elapsed=nil,1,0
+  local speaker,pending,playing,lastQueue
+  local pausedAt,timer
+  local function available() return type(juzeppeMusic)=="table" and type(juzeppeMusic.apiVersion)=="function" end
+  local function installed() return fs.exists("/juzeppe/apps/music/manifest.json") end
+  local function callApi(name,...)
+    if not available() or type(juzeppeMusic[name])~="function" then
+      return false,"Install Juzeppe Bridge 0.3.0 on the server"
+    end
+    return pcall(juzeppeMusic[name],...)
+  end
+  local function useSpeaker(method,...)
+    if not speaker then return false end
+    return pcall(peripheral.call,speaker,method,...)
+  end
+  local function haltSpeaker()
+    if playing then
+      useSpeaker("stop")
+      playing=false
+    end
+  end
+  local function stop(reason)
+    callApi("stop")
+    haltSpeaker()
+    pending=nil
+    playState="idle"
+    pausedAt=nil
+    notice=reason or "Stopped"
+  end
+  local function scan()
+    local nextSpeaker
+    for _,name in ipairs(peripheral.getNames()) do
+      if SIDES[name] and peripheral.hasType(name,"speaker") then
+        nextSpeaker=name
+        break
+      end
+    end
+    if speaker~=nextSpeaker then
+      haltSpeaker()
+      speaker=nextSpeaker
+      if playState=="playing" or playState=="buffering" then
+        playState="paused"; pausedAt=os.clock()
+        notice=speaker and "Speaker changed. Press Resume." or "Speaker disconnected"
+      end
+    end
+  end
+  local function isCall() return phone and phone.status().call~=nil end
+  local function pollSearch()
+    if searchState~="loading" then return end
+    local ok,value=callApi("searchResult")
+    if not ok or type(value)~="table" then
+      searchState="error"; notice=tostring(value); return
+    end
+    if value.state=="ready" then
+      results={}
+      for _,track in ipairs(value.tracks or {}) do
+        if type(track)=="table" and type(track.id)=="number" and type(track.title)=="string" then
+          results[#results+1]={id=track.id,title=track.title,artist=tostring(track.artist or "")}
+        end
+        if #results>=30 then break end
+      end
+      selected=nil
+      searchState="ready"
+      notice=#results>0 and (#results.." tracks found") or "No tracks found"
+    elseif value.state=="error" then
+      searchState="error"; notice=tostring(value.error or "Search error")
+    end
+  end
+  local function pump()
+    pollSearch()
+    if playState=="paused" then
+      if pausedAt and os.clock()-pausedAt>180 then stop("Paused too long; select track to restart") end
+      return
+    end
+    if playState~="playing" and playState~="buffering" then return end
+    if not installed() then stop("Music removed"); return end
+    if isCall() then
+      haltSpeaker()
+      playState="paused"; pausedAt=os.clock(); notice="Paused for What'sJuz call"
+      return
+    end
+    if not speaker then scan() end
+    if not speaker then
+      playState="paused"; pausedAt=os.clock(); notice="Connect a speaker"; return
+    end
+    if not pending then
+      local ok,chunk,state,reason=callApi("nextChunk")
+      if not ok then stop(tostring(chunk)); playState="error"; return end
+      if type(chunk)=="table" and #chunk>0 and #chunk<=131072 then
+        pending=chunk
+      elseif state=="finished" then
+        playState="finished"; notice="Track finished"; return
+      elseif state=="error" or state=="stopped" then
+        stop(tostring(reason or state)); playState="error"; return
+      else
+        playState="buffering"; notice="Buffering..."; return
+      end
+    end
+    local ok,sent=useSpeaker("playAudio",pending,volume)
+    if not ok then
+      playState="paused"; pausedAt=os.clock(); notice="Speaker unavailable"; return
+    end
+    if sent then
+      elapsed=elapsed+#pending/48000
+      pending=nil
+      playing=true
+      lastQueue=os.clock()
+      playState="playing"; notice="Playing"
+    end
+  end
+  local function command(name,value)
+    if name=="search" then
+      local ok,accepted,err=callApi("search",value)
+      if ok and accepted then
+        query=value; searchState="loading"; results={}; selected=nil; notice="Searching Muzmos..."
+      else
+        searchState="error"; notice=tostring(err or accepted)
+      end
+    elseif name=="play" then
+      if isCall() then notice="Finish the phone call first"; return end
+      scan()
+      if not speaker then notice="Connect a speaker"; return end
+      local track
+      for _,t in ipairs(results) do if t.id==value then track=t; break end end
+      if not track then notice="Select a track"; return end
+      stop()
+      local ok,accepted,err=callApi("play",track.id)
+      if ok and accepted then
+        selected=track.id; title=track.title; artist=track.artist
+        elapsed=0; playState="buffering"; notice="Opening track..."
+      else
+        playState="error"; notice=tostring(err or accepted)
+      end
+    elseif name=="pause" then
+      if playState=="playing" or playState=="buffering" then
+        playState="paused"; pausedAt=os.clock(); notice="Paused"
+      elseif playState=="paused" then
+        if isCall() then notice="Finish the phone call first"; return end
+        scan()
+        if not speaker then notice="Connect a speaker"; return end
+        pausedAt=nil; playState="buffering"; notice="Resuming"
+      end
+    elseif name=="stop" then stop()
+    elseif name=="volume" then
+      volume=math.max(.1,math.min(2,volume+value))
+    end
+  end
+  function self.command(name,value)
+    if not installed() then return false,"Music not installed" end
+    if name=="search" then
+      if type(value)~="string" or #value==0 or #value>640 then return false,"Enter a song or artist" end
+    elseif name=="play" then
+      if type(value)~="number" or value%1~=0 or value<1 or value>30 then return false,"Select a track" end
+    elseif name=="volume" then
+      if type(value)~="number" or math.abs(value)>.5 then return false,"Invalid volume" end
+    elseif name~="pause" and name~="stop" then return false,"Unknown music action" end
+    os.queueEvent("juzeppe_music_command",name,value)
+    return true
+  end
+  function self.status()
+    local copy={}
+    for i,t in ipairs(results) do copy[i]={id=t.id,title=t.title,artist=t.artist} end
+    return {available=available(),speaker=speaker~=nil,query=query,tracks=copy,searchState=searchState,
+      playState=playState,notice=notice,selected=selected,title=title,artist=artist,volume=volume,elapsed=math.floor(elapsed)}
+  end
+  function self.run()
+    if installed() then scan() end
+    timer=os.startTimer(.25)
+    while true do
+      local e,a,b=os.pullEventRaw()
+      if e=="juzeppe_music_command" then
+        command(a,b)
+        os.cancelTimer(timer); timer=os.startTimer(.05)
+      elseif e=="timer" and a==timer then
+        pump()
+        local fast=playState=="playing" or playState=="buffering" or searchState=="loading"
+        timer=os.startTimer(fast and .1 or 1)
+      elseif e=="speaker_audio_empty" and a==speaker then
+        if lastQueue and os.clock()-lastQueue>=.1 then playing=false end
+        pump()
+      elseif (e=="peripheral" or e=="peripheral_detach") and installed() then scan()
+      elseif e=="juzeppe_packages_changed" then
+        if installed() then scan() else stop("Music removed"); results={}; searchState="idle" end
+      end
+    end
+  end
+  function self.close()
+    stop()
     if timer then os.cancelTimer(timer) end
   end
   return self

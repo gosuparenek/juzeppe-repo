@@ -1,6 +1,6 @@
 # JuzeppeOS Package Repository
 
-Готовый статический сайт и HTTP-репозиторий для JuzeppeOS 0.9.1. Содержимое можно разместить на GitHub Pages или в любом каталоге Nginx; серверный код не требуется.
+Готовый статический сайт и HTTP-репозиторий для JuzeppeOS 0.9.2. Содержимое можно разместить на GitHub Pages или в любом каталоге Nginx; серверный код не требуется.
 
 ## GitHub Pages
 
@@ -19,7 +19,7 @@ https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pag
 
 ## Подключение JuzeppeOS
 
-В JuzeppeOS 0.9.1 репозиторий уже настроен установщиком. Открой магазин приложений или введи в терминале:
+В JuzeppeOS 0.9.2 репозиторий уже настроен установщиком. Открой магазин приложений или введи в терминале:
 
     jpkg refresh
     jpkg install office
@@ -48,7 +48,7 @@ https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pag
 
 ## Stock / беспроводной склад
 
-В JuzeppeOS 0.9.1 приложение Stock 1.1.0 читает Create Stock Ticker локально, через проводной модем или через беспроводной компьютер-посредник. Для склада нужен Create 6.0.7+ с интеграцией CC: Tweaked.
+В JuzeppeOS 0.9.2 приложение Stock 1.1.0 читает Create Stock Ticker локально, через проводной модем или через беспроводной компьютер-посредник. Для склада нужен Create 6.0.7+ с интеграцией CC: Tweaked.
 
 1. На компьютере рядом с тикером установите Wireless Modem либо Ender Modem. Тикер должен быть связан с нужной сетью Create.
 2. В CraftOS скачайте и запустите службу:
@@ -67,7 +67,7 @@ https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pag
 
 ## What'sJuz 1.0.0
 
-Установите What'sJuz через Apps на JuzeppeOS 0.9.1. На каждом компьютере нужен один Wired, Wireless или Ender Modem. Для звука поставьте Speaker, а для речи — прилегающий к компьютеру блок Microphone из CC-Simple Voice Microphone integration (NeoForge 1.21.1, 1.0.0), установленного вместе с Simple Voice Chat и CC:T на сервере и клиентах.
+Установите What'sJuz через Apps на JuzeppeOS 0.9.2. На каждом компьютере нужен один Wired, Wireless или Ender Modem. Для звука поставьте Speaker, а для речи — прилегающий к компьютеру блок Microphone из CC-Simple Voice Microphone integration (NeoForge 1.21.1, 1.0.0), установленного вместе с Simple Voice Chat и CC:T на сервере и клиентах.
 
 Откройте приложение, разрешите phone.calls. Номер 10–99 случайно выдаётся каждому терминалу, сохраняется при перезапуске. Конфликты номеров разрешаются автоматически при встрече доступных телефонов. Откройте Dial и введите номер или выберите контакт; на другом телефоне нажмите Accept. Talk включает микрофон в принятом звонке, Mute выключает его, End завершает разговор. Speaker проигрывает звонок и гудки. Служба остаётся активной при закрытии окна, пока включена ОС. Off отключает службу и её модемный канал. On включает её обратно.
 
@@ -85,6 +85,10 @@ https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pag
 
 Проверено в CraftOS-PC: два телефона без прямой связи, два промежуточных ретранслятора и дополнительная петля; обнаружение, вызов, гудки, принятие, аудио и завершение звонка. Настоящая радиосвязь в Minecraft требует проверки на сервере.
 
-### Проводная телефония (JuzeppeOS 0.9.1)
+### Проводная телефония (JuzeppeOS 0.9.2)
 
 Подключите Wired Modem непосредственно к каждому компьютеру и соедините их Networking Cable. What'sJuz автоматически подключается к проводным и беспроводным модемам одновременно. Динамик и микрофон подключаются локально к каждому компьютеру, независимо от типа связи. Кабель не ограничен радиусом беспроводной связи, но его трасса и компьютеры должны находиться в загруженных чанках. Ретранслятор по кабелю не нужен. Обновите ОС на обоих телефонах; пакет What'sJuz 1.0.0 переустанавливать не требуется.
+
+## Juzeppe Music
+
+Music 1.0.0 adds song/artist search through the public Muzmos catalog and streams MP3 audio through an attached CC Speaker. It requires JuzeppeOS 0.9.2 and the server-side Juzeppe Bridge 0.3.0. Replace the older Bridge JAR, restart the Minecraft server, update the OS and install Music from Apps. Click Search, enter a title or artist, then click a result. Pause/Resume, Stop and volume buttons control playback. The background music service pauses on What'sJuz calls. The server fetches only public catalog playback URLs from muzmos.com; no arbitrary URL entry or persistent media downloads. The live catalog depends on Muzmos availability and its public markup.

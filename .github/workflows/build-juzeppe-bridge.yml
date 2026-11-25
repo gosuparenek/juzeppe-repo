@@ -28,8 +28,47 @@ jobs:
       - name: Build server mod
         working-directory: bridge
         run: gradle --no-daemon build
+      - name: Verify generated 44.1 kHz MP3 and live catalog search
+        working-directory: bridge
+        run: |
+          ffmpeg -hide_banner -loglevel error -f lavfi -i 'sine=frequency=440:duration=0.25:sample_rate=44100' -ac 2 -c:a libmp3lame /tmp/juzeppe-tone.mp3
+          gradle --no-daemon musicSmoke -PmusicTestFile=/tmp/juzeppe-tone.mp3 -PliveMusicSearch=true
       - uses: actions/upload-artifact@v4
         with:
-          name: juzeppe-bridge-0.2.1
-          path: bridge/build/libs/juzeppe-bridge-0.2.1.jar
+          name: juzeppe-bridge-0.3.0
+          path: bridge/build/libs/juzeppe-bridge-0.3.0.jar
           if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      statuses: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: juzeppe-bridge-v0.3.0
+      JAR: juzeppe-bridge-0.3.0.jar
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: juzeppe-bridge-0.3.0
+          path: dist
+      - name: Publish JAR
+        run: |
+          test -s "dist/$JAR"
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release view "$TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' | grep -Fx "$JAR"
+          else
+            gh release create "$TAG" "dist/$JAR" --repo "$GH_REPO" --target "$GITHUB_SHA" --title "Juzeppe Bridge 0.3.0" --notes "Adds Muzmos catalog search and MP3 streaming. Existing Stock integration preserved. In-game playback needs verification." --prerelease
+          fi
+      - name: Record publication status
+        if: always()
+        env:
+          JOB_RESULT: ${{ job.status }}
+        run: |
+          STATE=failure
+          if [ "$JOB_RESULT" = success ]; then STATE=success; fi
+          gh api "repos/$GH_REPO/statuses/$GITHUB_SHA" -f state="$STATE" -f context="bridge-release-0.3.0" -f target_url="https://github.com/$GH_REPO/releases/tag/$TAG" -f description="Direct JAR publication"

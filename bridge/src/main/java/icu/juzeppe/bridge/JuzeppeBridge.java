@@ -24,7 +24,10 @@ public final class JuzeppeBridge {
     }
 
     private void setup(FMLCommonSetupEvent event) {
-        event.enqueueWork(() -> ComputerCraftAPI.registerAPIFactory(StockApi::new));
+        event.enqueueWork(() -> {
+            ComputerCraftAPI.registerAPIFactory(StockApi::new);
+            ComputerCraftAPI.registerAPIFactory(computer -> new MusicApi());
+        });
     }
 
     private void registerCommands(RegisterCommandsEvent event) {
