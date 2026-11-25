@@ -25,6 +25,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
+      - name: Inspect public search redirect
+        run: |
+          curl -sS --max-time 15 -o /dev/null -D - 'https://muzmos.com/search/?q=Queen' | grep -iE '^(HTTP/|location:)'
       - name: Build server mod
         working-directory: bridge
         run: gradle --no-daemon build

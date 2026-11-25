@@ -77,7 +77,7 @@ final class MusicCatalog {
             String path = uri.getPath();
             if (!isOrigin(uri) || (audio ? !isAudio(uri) :
                     path == null || !(path.equals("/search") || path.startsWith("/search/")))) {
-                throw new IOException("Unexpected Muzmos redirect destination");
+                throw new IOException("Unexpected Muzmos redirect destination: " + uri.getScheme() + "://" + uri.getHost() + uri.getPath());
             }
             HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
             connection.setInstanceFollowRedirects(false);
