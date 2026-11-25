@@ -56,8 +56,22 @@ final class MusicCatalog {
 
     private static boolean isOrigin(URI uri) {
         return "https".equalsIgnoreCase(uri.getScheme()) &&
-            "muzmos.com".equalsIgnoreCase(uri.getHost()) &&
+            isMuzmosHost(uri.getHost()) &&
             (uri.getPort() == -1 || uri.getPort() == 443) && uri.getUserInfo() == null;
+    }
+
+    private static boolean isMuzmosHost(String host) {
+        if (host == null) return false;
+        host = host.toLowerCase(java.util.Locale.ROOT);
+        return host.equals("muzmos.com") ||
+            host.matches("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.muzmos\\.com");
+    }
+
+    private static boolean isSearchPath(URI uri) {
+        String path = uri.getPath();
+        if (path == null) return false;
+        return path.equals("/search") || path.startsWith("/search/") ||
+            (!"muzmos.com".equalsIgnoreCase(uri.getHost()) && path.equals("/"));
     }
 
     private static boolean isAudio(URI uri) {
@@ -74,10 +88,8 @@ final class MusicCatalog {
 
     private static InputStream open(URI uri, boolean audio) throws IOException {
         for (int redirect = 0; redirect <= 3; redirect++) {
-            String path = uri.getPath();
-            if (!isOrigin(uri) || (audio ? !isAudio(uri) :
-                    path == null || !(path.equals("/search") || path.startsWith("/search/")))) {
-                throw new IOException("Unexpected Muzmos redirect destination: " + uri.getScheme() + "://" + uri.getHost() + uri.getPath());
+            if (!isOrigin(uri) || (audio ? !isAudio(uri) : !isSearchPath(uri))) {
+                throw new IOException("Unexpected Muzmos redirect destination");
             }
             HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
             connection.setInstanceFollowRedirects(false);
