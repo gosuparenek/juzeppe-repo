@@ -1,0 +1,22 @@
+name: Inspect microphone API
+on:
+  pull_request:
+    paths: ['.github/workflows/check-phone-audio-api.yml']
+permissions:
+  contents: read
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Check public peripheral signatures and sample format
+        run: |
+          curl -fLsS 'https://api.modrinth.com/maven/maven/modrinth/5LIyHUf0/jJNwZXXA/5LIyHUf0-jJNwZXXA.jar' -o microphone.jar
+          jar tf microphone.jar | grep -Ei 'microphone|audio|voice'
+          for class in $(jar tf microphone.jar | grep -Ei '(microphone|peripheral|voicechat|audio).*\.class$' | grep -v '\$' | sed 's/\.class$//;s@/@.@g'); do
+            javap -classpath microphone.jar -p -c "$class" | grep -E -A 55 -B 3 'pullAudio\(|isActive\(|getType\(|short\[\]|byte\[\]|onMicrophonePacket\(|decode\(' || true
+          done
