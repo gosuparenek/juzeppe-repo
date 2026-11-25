@@ -1,0 +1,26 @@
+name: Inspect public music catalog
+on:
+  pull_request:
+    paths: ['.github/workflows/check-music-catalog.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Inspect public search form and playback markup
+        run: |
+          python3 - <<'PY'
+          import urllib.request, re
+          from html.parser import HTMLParser
+          url="https://muzmos.com/"
+          def get(url):
+              with urllib.request.urlopen(urllib.request.Request(url,headers={"User-Agent":"JuzeppeOS music client/1.0"}),timeout=15) as r:
+                  return r.read(2000000).decode('utf-8','replace')
+          html=get(url)
+          for s in re.findall(r'<(?:form|input|script)[^>]*>',html,re.I)[:40]:
+              print(s[:400])
+          for s in re.findall(r'<[^>]*(?:data-url|data-track|data-src|data-audio|\.mp3|/search)[^>]*>',html,re.I)[:15]:
+              print(s[:500])
+          PY
