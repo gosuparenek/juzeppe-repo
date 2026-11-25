@@ -60,7 +60,7 @@
       "short_ru": "\u0421\u043a\u043b\u0430\u0434",
       "description": "Local and wireless Create stock, native menu with Bridge",
       "description_ru": "\u0421\u043a\u043b\u0430\u0434 Create \u0438 \u0448\u0442\u0430\u0442\u043d\u043e\u0435 \u043c\u0435\u043d\u044e \u0447\u0435\u0440\u0435\u0437 Bridge",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "api": 1,
       "entry": "main.lua",
       "order": 102,
