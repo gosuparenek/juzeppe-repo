@@ -1,7 +1,7 @@
--- JuzeppeOS 0.8.2 Sandstone installer / launcher
+-- JuzeppeOS 0.8.3 Sandstone installer / launcher
 local args={...}
 local root="/juzeppe"
-local version="0.8.2"
+local version="0.8.3"
 local function read(path)
   if not fs.exists(path) or fs.isDir(path) then return nil end
   local f=fs.open(path,"r")
@@ -195,6 +195,8 @@ local desktop,latest,active=nil,nil,nil
 local serial=0
 local network=net.new({notify=function(msg) if desktop then k.send(desktop,"system_notice",msg) end end})
 k.network=network
+local stock=dofile("/juzeppe/system/stock-remote.lua")()
+k.stock=stock
 k.latest=function() return latest end
 function k.install(item)
   if active then return nil,"Another installation is running" end
@@ -235,7 +237,7 @@ local function launch()
   if k.processes[pid] then desktop=pid end
 end
 local ok,err=xpcall(function()
-  journal("kernel","boot","0.8.2")
+  journal("kernel","boot","0.8.3")
   _G.__juzeppe_active_network=network
   k.spawn("network",function()
     network:start()
@@ -246,6 +248,9 @@ local ok,err=xpcall(function()
       else network:event(table.unpack(e,1,e.n)) end
     end
   end,function() network:close() end)
+  k.spawn("stock-client",function()
+    while true do stock.event(os.pullEventRaw()) end
+  end,function() stock.close() end)
   launch()
   while k.running do
     local e=table.pack(os.pullEventRaw())
@@ -266,7 +271,7 @@ return {refresh=false,draw=function(c)
   local P=c.colors
   c.text(2,1,"J U Z E P P E  /  OS",P.accent)
   c.text(2,3,"Sandstone Edition")
-  c.text(2,4,"Version 0.8.2 / API 1")
+  c.text(2,4,"Version 0.8.3 / API 1")
   c.text(2,5,"CraftOS / CC: Tweaked")
   c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
   c.status("Designed for Juzeppe")
@@ -280,7 +285,7 @@ end}
   "name_ru": "Об ОС",
   "description": "System",
   "description_ru": "Система",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "api": 1,
   "entry": "main.lua",
   "order": 8,
@@ -1220,7 +1225,7 @@ end}
   "name_ru": "Магазин",
   "description": "Packages",
   "description_ru": "Пакеты",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "api": 1,
   "entry": "main.lua",
   "order": 5,
@@ -2081,7 +2086,7 @@ local function drawBar()
   local available=clockX-x
   if available<4 then return end
   if #tasks==0 then
-    if available>=6 then line(x+1,H,"v0.8.2",P.tint,P.ink) end
+    if available>=6 then line(x+1,H,"v0.8.3",P.tint,P.ink) end
     return
   end
   local count=math.max(1,math.floor(available/9))
@@ -2530,7 +2535,7 @@ local function fileTransfer(transfer)
   end
 end
 local function run()
-  journal("desktop","start","0.8.2")
+  journal("desktop","start","0.8.3")
   refresh()
   pollDesktop()
   local netRevision=network.revision
@@ -3657,7 +3662,7 @@ function M.validateManifest(m)
     local seen={}
     for i,v in pairs(m.permissions) do
       if type(i)~="number" or i%1~=0 or i<1 or i>#m.permissions or
-        (v~="desktop.files" and v~="printer" and v~="clipboard" and v~="stock.read") or seen[v] then return nil,"Invalid permission" end
+        (v~="desktop.files" and v~="printer" and v~="clipboard" and v~="stock.read" and v~="stock.remote") or seen[v] then return nil,"Invalid permission" end
       seen[v]=true
     end
   end
@@ -3959,6 +3964,10 @@ return function(win,c,grants,locale)
       end
     }
   end
+  if grants["stock.remote"] then
+    api.stock=api.stock or {}
+    api.stock.remote=c.stockRemote
+  end
   if grants.printer then
     local function printer(n) return peripheral.hasType(n,"printer") end
     env.peripheral={hasType=function(n,t) return t=="printer" and printer(n) end,
@@ -4136,7 +4145,7 @@ function M.new(host,P,locale,config)
     local changed=false
     for i=#self.jobs,1,-1 do
       local job=self.jobs[i]
-      if job and not job.finished and (job.owner.trusted or (event=="task_complete" and job.filter==event)) and (not job.filter or job.filter==event) then
+      if job and not job.finished and (job.owner.trusted or ((event=="task_complete" or event=="juzeppe_stock_result") and job.filter==event)) and (not job.filter or job.filter==event) then
         self:resumeJob(job,event,...); changed=true
       end
 
@@ -4155,6 +4164,12 @@ function M.new(host,P,locale,config)
     local dataPath="/juzeppe/data/"..app.id
     if not fs.exists(dataPath) then fs.makeDir(dataPath) end
     local c={
+      stockRemote=function(id)
+        for _,job in ipairs(self.jobs) do
+          if job.owner==win and job.thread==coroutine.running() then return config.kernel.stock.read(id) end
+        end
+        return nil,"Use a background job to read remote stock"
+      end,
       shared=proc.shared,pid=proc.pid,onClose=function(fn) assert(type(fn)=="function"); win.cleanup[#win.cleanup+1]=fn end,
       newWindow=function() if not win.closed then config.newWindow(win,proc,documents) end end,
       yieldStep=function() return coroutine.yield(STEP) end,api=1,colors=P,dataPath=dataPath,appPath=app.path,package=config.pkg,
@@ -4583,7 +4598,7 @@ return M
   "Interrupted": "Прервано",
   "Could not save message": "Не удалось сохранить сообщение",
   "Network changed": "Сеть изменена",
-  "Version 0.8.2 / API 1": "Версия 0.8.2 / API 1"
+  "Version 0.8.3 / API 1": "Версия 0.8.3 / API 1"
 }
 ]=],
     ["system/session.lua"]=[=[
@@ -4979,6 +4994,127 @@ return function(path,env,checkpoint)
   local factory,why=load(table.concat(chunks),"@"..path,"t",env)
   if not factory then return nil,why end
   return factory()(checkpoint)
+end
+]=],
+    ["system/stock-remote.lua"]=[=[
+-- Read-only wireless stock protocol. Separate channels from the city network.
+local REQUEST,REPLY=48530,48531
+local PROTOCOL="juzeppe.stock/1"
+local MAX_ROWS,CHUNK=4096,48
+return function()
+  local self={}
+  local pending,ports={},{}
+  local serial=0
+  local running=true
+  local function release(name)
+    local port=ports[name]
+    if not port then return end
+    port.users=port.users-1
+    if port.users==0 then
+      ports[name]=nil
+      if port.owned then pcall(peripheral.call,name,"close",REPLY) end
+    end
+  end
+  local function finish(req,rows,err)
+    pending[req.token]=nil
+    req.done=true
+    req.rows,req.err=rows,err
+    os.cancelTimer(req.timer)
+    release(req.side)
+    os.queueEvent("juzeppe_stock_result",req.token)
+  end
+  local function acquire()
+    local names=peripheral.getNames()
+    table.sort(names)
+    for _,name in ipairs(names) do
+      if peripheral.hasType(name,"modem") then
+        local ok,wireless=pcall(peripheral.call,name,"isWireless")
+        if ok and wireless then
+          local port=ports[name]
+          if not port then
+            local opened,already=pcall(peripheral.call,name,"isOpen",REPLY)
+            if opened then
+              local ready=already or pcall(peripheral.call,name,"open",REPLY)
+              if ready then port={users=0,owned=not already}; ports[name]=port end
+            end
+          end
+          if port then port.users=port.users+1; return name end
+        end
+      end
+    end
+  end
+  function self.read(id)
+    if not running then return nil,"Stock service stopped" end
+    if type(id)~="number" or id%1~=0 or id<0 or id>2147483647 then
+      return nil,"Invalid computer ID"
+    end
+    local side=acquire()
+    if not side then return nil,"Connect a wireless modem" end
+    serial=serial+1
+    local token=tostring(os.getComputerID()).."-"..tostring(os.epoch("utc")).."-"..serial
+    local req={token=token,side=side,host=id,parts={},received=0,rowsCount=0,timer=os.startTimer(12)}
+    pending[token]=req
+    local ok,err=pcall(peripheral.call,side,"transmit",REQUEST,REPLY,
+      {protocol=PROTOCOL,kind="request",from=os.getComputerID(),to=id,token=token})
+    if not ok then finish(req,nil,tostring(err)) end
+    while not req.done do os.pullEventRaw("juzeppe_stock_result") end
+    return req.rows,req.err
+  end
+  local function validRows(rows)
+    if type(rows)~="table" or #rows>CHUNK then return nil end
+    local result={}
+    for i=1,#rows do
+      local row=rows[i]
+      if type(row)~="table" or type(row.name)~="string" or #row.name==0 or #row.name>256 or
+        type(row.count)~="number" or row.count<0 or row.count>9007199254740991 or row.count%1~=0 then
+        return nil
+      end
+      result[i]={name=row.name,count=row.count}
+    end
+    return result
+  end
+  function self.event(e,a,b,c,d)
+    if e=="timer" then
+      for _,req in pairs(pending) do
+        if req.timer==a then finish(req,nil,"No response from #"..req.host); break end
+      end
+    elseif e=="peripheral_detach" then
+      ports[a]=nil
+      for _,req in pairs(pending) do
+        if req.side==a then finish(req,nil,"Wireless modem disconnected") end
+      end
+    elseif e=="modem_message" and b==REPLY and c==REQUEST and type(d)=="table" and d.protocol==PROTOCOL then
+      local req=pending[d.token]
+      if not req or req.side~=a or d.to~=os.getComputerID() or d.from~=req.host then return end
+      if d.kind=="error" then
+        finish(req,nil,type(d.error)=="string" and d.error:sub(1,160) or "Stock host error")
+        return
+      end
+      if d.kind~="page" or type(d.total)~="number" or d.total%1~=0 or d.total<1 or
+        d.total>math.ceil(MAX_ROWS/CHUNK) or type(d.index)~="number" or
+        d.index%1~=0 or d.index<1 or d.index>d.total or (req.total and req.total~=d.total) then return end
+      if req.parts[d.index] then return end
+      local rows=validRows(d.rows)
+      if not rows or (d.index<d.total and #rows~=CHUNK) then return end
+      if req.rowsCount+#rows>MAX_ROWS then finish(req,nil,"Stock list too large"); return end
+      req.total=d.total
+      req.parts[d.index]=rows
+      req.rowsCount=req.rowsCount+#rows
+      req.received=req.received+1
+      if req.received==req.total then
+        local items={}
+        for i=1,req.total do
+          for _,row in ipairs(req.parts[i]) do items[#items+1]=row end
+        end
+        finish(req,items)
+      end
+    end
+  end
+  function self.close()
+    running=false
+    for _,req in pairs(pending) do finish(req,nil,"Stock service stopped") end
+  end
+  return self
 end
 ]=],
   }
