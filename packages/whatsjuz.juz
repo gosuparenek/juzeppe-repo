@@ -1,0 +1,30 @@
+{
+  "manifest": {
+    "id": "whatsjuz",
+    "name": "What'sJuz",
+    "name_ru": "What'sJuz",
+    "short": "WJuz",
+    "short_ru": "WJuz",
+    "description": "Wireless phone calls with two-digit numbers",
+    "description_ru": "\u0413\u043e\u043b\u043e\u0441\u043e\u0432\u044b\u0435 \u0437\u0432\u043e\u043d\u043a\u0438 \u043f\u043e \u0434\u0432\u0443\u0437\u043d\u0430\u0447\u043d\u044b\u043c \u043d\u043e\u043c\u0435\u0440\u0430\u043c",
+    "version": "1.0.0",
+    "api": 1,
+    "entry": "main.lua",
+    "order": 104,
+    "icon": [
+      "011110",
+      "110001",
+      "101001",
+      "100101",
+      "100011",
+      "011110"
+    ],
+    "author": "Juzeppe",
+    "permissions": [
+      "phone.calls"
+    ]
+  },
+  "files": {
+    "main.lua": "local ui=...\nlocal offset=0\nlocal function tr(en,ru) return ui.getLanguage()==\"en\" and en or ru end\nlocal function command(name,value)\n  local ok,err=ui.phone.command(name,value)\n  if not ok then ui.status(err) end\n  ui.invalidate()\nend\nlocal function dial()\n  ui.prompt(tr(\"Two-digit number\",\"\u0414\u0432\u0443\u0437\u043d\u0430\u0447\u043d\u044b\u0439 \u043d\u043e\u043c\u0435\u0440\"),\"\",function(value)\n    command(\"dial\",value)\n  end)\nend\nlocal function scroll(n)\n  local status=ui.phone.status()\n  offset=math.max(0,math.min(offset+n,math.max(0,#status.peers-math.max(1,ui.height-5))))\n  ui.invalidate()\nend\ncommand(\"initialize\")\nlocal function centered(c,y,text,fg,bg)\n  if y>=1 and y<=c.height then c.raw(math.max(1,math.floor((c.width-(utf8.len(text) or #text))/2)+1),y,text,fg,bg) end\nend\nlocal function drawCall(c,s)\n  local P=c.colors\n  local call=s.call\n  c.rect(1,2,c.width,c.height-1,P.foliage)\n  local banner=call.state==\"incoming\" and tr(\"INCOMING\",\"\u0412\u0425\u041e\u0414\u042f\u0429\u0418\u0419\") or\n    call.state==\"dialing\" and tr(\"CALLING\",\"\u0412\u042b\u0417\u041e\u0412\") or tr(\"CONNECTED\",\"\u0421\u041e\u0415\u0414\u0418\u041d\u0415\u041d\u041e\")\n  centered(c,2,banner,P.paper,P.foliage)\n  centered(c,3,\"[\"..tostring(call.number)..\"]\",P.paper,P.foliage)\n  if call.state==\"active\" then\n    centered(c,4,string.format(\"%02d:%02d\",math.floor(call.seconds/60),call.seconds%60),P.paper,P.foliage)\n    local state=not s.microphone and tr(\"No microphone\",\"\u041d\u0435\u0442 \u043c\u0438\u043a\u0440\u043e\u0444\u043e\u043d\u0430\") or\n      (call.muted and tr(\"Mic off\",\"\u041c\u0438\u043a\u0440. \u0432\u044b\u043a\u043b.\") or call.micReady and tr(\"Mic on\",\"\u041c\u0438\u043a\u0440. \u0432\u043a\u043b.\") or tr(\"Preparing mic\",\"\u041f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u043a\u0430 \u043c\u0438\u043a\u0440.\"))\n    centered(c,5,state,P.paper,P.foliage)\n    c.button(2,c.height,call.muted and tr(\" Talk \",\" \u0413\u043e\u0432\u043e\u0440\u0438\u0442\u044c \") or tr(\" Mute \",\" \u0411\u0435\u0437 \u043c\u0438\u043a\u0440. \"),function() command(\"talk\") end,P.oasis,P.paper)\n  elseif call.state==\"incoming\" then\n    centered(c,4,tr(\"Answer the call?\",\"\u041f\u0440\u0438\u043d\u044f\u0442\u044c \u0437\u0432\u043e\u043d\u043e\u043a?\"),P.paper,P.foliage)\n    c.button(2,c.height,tr(\" Accept \",\" \u041f\u0440\u0438\u043d\u044f\u0442\u044c \"),function() command(\"answer\") end,P.oasis,P.paper)\n  else centered(c,4,tr(\"Waiting for answer\",\"\u041e\u0436\u0438\u0434\u0430\u043d\u0438\u0435 \u043e\u0442\u0432\u0435\u0442\u0430\"),P.paper,P.foliage) end\n  local endText=tr(\" End \",\" \u0421\u0431\u0440\u043e\u0441 \")\n  c.button(math.max(12,c.width-7),c.height,endText,function() command(\"end\") end,P.danger,P.paper)\nend\nlocal function draw(c)\n  local P=c.colors\n  local s=c.phone.status()\n  local w,h=c.width,c.height\n  c.rect(1,1,w,1,P.foliage)\n  c.raw(2,1,\"What'sJuz\",P.paper,P.foliage)\n  c.raw(math.max(12,w-3),1,s.number and tostring(s.number) or \"--\",P.paper,P.foliage)\n  c.status(s.notice)\n  if h<7 or w<22 then c.raw(1,2,\"Resize window\"); return end\n  if s.call then drawCall(c,s); return end\n  c.rect(1,2,w,1,P.tint)\n  c.raw(2,2,(s.online and tr(\"Online\",\"\u0412 \u0441\u0435\u0442\u0438\") or s.enabled and tr(\"No modem\",\"\u041d\u0435\u0442 \u043c\u043e\u0434\u0435\u043c\u0430\") or tr(\"Offline\",\"\u041d\u0435 \u0432 \u0441\u0435\u0442\u0438\")),P.ink,P.tint)\n  c.raw(math.max(12,w-7),2,s.speaker and \"SPK+\" or \"SPK-\",P.foliage,P.tint)\n  c.button(1,3,tr(\" Dial \",\" \u041d\u0430\u0431\u0440\u0430\u0442\u044c \"),dial,P.foliage,P.paper)\n  local toggle=s.enabled and \" Off \" or \" On \"\n  c.button(w-5,3,toggle,function() command(s.enabled and \"offline\" or \"online\") end,P.deep,P.paper)\n  c.rect(1,4,w,1,P.tint)\n  c.raw(2,4,tr(\"CONTACTS\",\"\u041a\u041e\u041d\u0422\u0410\u041a\u0422\u042b\")..\"  \"..#s.peers,P.muted,P.tint)\n  local count=math.max(1,h-5)\n  offset=math.max(0,math.min(offset,math.max(0,#s.peers-count)))\n  for i=1,count do\n    local p=s.peers[offset+i]\n    if p then\n      local y=4+i\n      local bg=i%2==0 and P.tint or P.paper\n      c.rect(1,y,w,1,bg)\n      c.raw(1,y,\" \"..p.number..\" \",P.paper,P.oasis)\n      c.raw(6,y,p.label:sub(1,math.max(1,w-11)),P.ink,bg)\n      c.raw(w-4,y,\"CALL\",P.foliage,bg)\n      c.hit(1,y,w,1,function() command(\"dial\",p.number) end)\n    end\n  end\n  if #s.peers==0 then\n    c.raw(2,5,s.enabled and tr(\"Finding phones...\",\"\u041f\u043e\u0438\u0441\u043a \u0442\u0435\u043b\u0435\u0444\u043e\u043d\u043e\u0432...\") or tr(\"Turn phone on\",\"\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u0435 \u0442\u0435\u043b\u0435\u0444\u043e\u043d\"),P.muted)\n  end\n  c.button(1,h,\" < \",function() scroll(-count) end,P.tint,P.ink)\n  c.button(5,h,\" > \",function() scroll(count) end,P.tint,P.ink)\n  c.raw(10,h,s.microphone and \"MIC+\" or \"MIC-\",P.muted)\nend\nreturn {refresh=true,draw=draw,events={mouse_scroll=true,key=true},\n  event=function(c,e,a)\n    if e==\"mouse_scroll\" then scroll(a)\n    elseif e==\"key\" and a==keys.up then scroll(-1)\n    elseif e==\"key\" and a==keys.down then scroll(1)\n    elseif e==\"key\" and a==keys.d then dial()\n    elseif e==\"key\" and a==keys.escape then command(\"end\") end\n  end}\n"
+  }
+}

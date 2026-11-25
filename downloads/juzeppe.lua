@@ -1,7 +1,7 @@
--- JuzeppeOS 0.8.5 Sandstone installer / launcher
+-- JuzeppeOS 0.9.0 Sandstone installer / launcher
 local args={...}
 local root="/juzeppe"
-local version="0.8.5"
+local version="0.9.0"
 local function read(path)
   if not fs.exists(path) or fs.isDir(path) then return nil end
   local f=fs.open(path,"r")
@@ -197,6 +197,10 @@ local network=net.new({notify=function(msg) if desktop then k.send(desktop,"syst
 k.network=network
 local stock=dofile("/juzeppe/system/stock-remote.lua")()
 k.stock=stock
+local phone=dofile("/juzeppe/system/phone.lua")(function(msg)
+  if desktop then k.send(desktop,"system_notice",msg) end
+end)
+k.phone=phone
 k.latest=function() return latest end
 function k.install(item)
   if active then return nil,"Another installation is running" end
@@ -237,7 +241,7 @@ local function launch()
   if k.processes[pid] then desktop=pid end
 end
 local ok,err=xpcall(function()
-  journal("kernel","boot","0.8.5")
+  journal("kernel","boot","0.9.0")
   _G.__juzeppe_active_network=network
   k.spawn("network",function()
     network:start()
@@ -251,6 +255,7 @@ local ok,err=xpcall(function()
   k.spawn("stock-client",function()
     while true do stock.event(os.pullEventRaw()) end
   end,function() stock.close() end)
+  k.spawn("phone",phone.run,phone.close)
   launch()
   while k.running do
     local e=table.pack(os.pullEventRaw())
@@ -271,7 +276,7 @@ return {refresh=false,draw=function(c)
   local P=c.colors
   c.text(2,1,"J U Z E P P E  /  OS",P.accent)
   c.text(2,3,"Sandstone Edition")
-  c.text(2,4,"Version 0.8.5 / API 1")
+  c.text(2,4,"Version 0.9.0 / API 1")
   c.text(2,5,"CraftOS / CC: Tweaked")
   c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
   c.status("Designed for Juzeppe")
@@ -285,7 +290,7 @@ end}
   "name_ru": "Об ОС",
   "description": "System",
   "description_ru": "Система",
-  "version": "0.8.5",
+  "version": "0.9.0",
   "api": 1,
   "entry": "main.lua",
   "order": 8,
@@ -1225,7 +1230,7 @@ end}
   "name_ru": "Магазин",
   "description": "Packages",
   "description_ru": "Пакеты",
-  "version": "0.8.5",
+  "version": "0.9.0",
   "api": 1,
   "entry": "main.lua",
   "order": 5,
@@ -2086,7 +2091,7 @@ local function drawBar()
   local available=clockX-x
   if available<4 then return end
   if #tasks==0 then
-    if available>=6 then line(x+1,H,"v0.8.5",P.tint,P.ink) end
+    if available>=6 then line(x+1,H,"v0.9.0",P.tint,P.ink) end
     return
   end
   local count=math.max(1,math.floor(available/9))
@@ -2535,7 +2540,7 @@ local function fileTransfer(transfer)
   end
 end
 local function run()
-  journal("desktop","start","0.8.5")
+  journal("desktop","start","0.9.0")
   refresh()
   pollDesktop()
   local netRevision=network.revision
@@ -3662,7 +3667,7 @@ function M.validateManifest(m)
     local seen={}
     for i,v in pairs(m.permissions) do
       if type(i)~="number" or i%1~=0 or i<1 or i>#m.permissions or
-        (v~="desktop.files" and v~="printer" and v~="clipboard" and v~="stock.read" and v~="stock.remote" and v~="stock.native") or seen[v] then return nil,"Invalid permission" end
+        (v~="desktop.files" and v~="printer" and v~="clipboard" and v~="stock.read" and v~="stock.remote" and v~="stock.native" and v~="phone.calls") or seen[v] then return nil,"Invalid permission" end
       seen[v]=true
     end
   end
@@ -3984,6 +3989,9 @@ return function(win,c,grants,locale)
       return juzeppebridge.openStock()
     end
   end
+  if grants["phone.calls"] then
+    api.phone={status=c.phone.status,command=c.phone.command}
+  end
   if grants.printer then
     local function printer(n) return peripheral.hasType(n,"printer") end
     env.peripheral={hasType=function(n,t) return t=="printer" and printer(n) end,
@@ -4180,6 +4188,7 @@ function M.new(host,P,locale,config)
     local dataPath="/juzeppe/data/"..app.id
     if not fs.exists(dataPath) then fs.makeDir(dataPath) end
     local c={
+      phone=config.kernel.phone,
       stockRemote=function(id,native)
         for _,job in ipairs(self.jobs) do
           if job.owner==win and job.thread==coroutine.running() then return config.kernel.stock.read(id,native) end
@@ -4614,7 +4623,7 @@ return M
   "Interrupted": "Прервано",
   "Could not save message": "Не удалось сохранить сообщение",
   "Network changed": "Сеть изменена",
-  "Version 0.8.5 / API 1": "Версия 0.8.5 / API 1"
+  "Version 0.9.0 / API 1": "Версия 0.9.0 / API 1"
 }
 ]=],
     ["system/session.lua"]=[=[
@@ -5133,6 +5142,383 @@ return function()
   function self.close()
     running=false
     for _,req in pairs(pending) do finish(req,nil,"Stock service stopped") end
+  end
+  return self
+end
+]=],
+    ["system/phone.lua"]=[=[
+-- What'sJuz phone service. One wireless channel, no central server.
+local util=dofile("/juzeppe/system/util.lua")
+local audioRequire=require
+if not audioRequire then
+  local env=setmetatable({},{__index=_ENV})
+  env.require,env.package=dofile("/rom/modules/main/cc/require.lua").make(env,"/juzeppe/system")
+  audioRequire=env.require
+end
+local dfpwm=audioRequire("cc.audio.dfpwm")
+local CHANNEL,PROTOCOL=48640,"whatsjuz/1"
+local HOME="/juzeppe/data/whatsjuz/"
+local SIDES={top=true,bottom=true,left=true,right=true,front=true,back=true}
+local function numberOK(n) return type(n)=="number" and n%1==0 and n>=10 and n<=99 end
+local function idOK(n) return type(n)=="number" and n%1==0 and n>=0 and n<=2147483647 end
+return function(notify)
+  local self={}
+  local id=os.getComputerID()
+  local session=tostring(os.epoch("utc"))..":"..id..":"..math.random(1000000)
+  local enabled,activated=false,false
+  local number,modem,owned,speaker,mic
+  local peers,ended={},{}
+  local call,notice
+  local serial=0
+  local nextHello,nextScan=0,0
+  local timer
+  local function info(s) notice=s end
+  local function installed() return fs.exists("/juzeppe/apps/whatsjuz/manifest.json") end
+  local function save()
+    if not fs.exists(HOME) then fs.makeDir(HOME) end
+    util.write(HOME.."enabled",enabled and "on" or "off")
+    if number then util.write(HOME.."number",tostring(number)) end
+  end
+  local function invoke(name,method,...)
+    if not name then return false end
+    return pcall(peripheral.call,name,method,...)
+  end
+  local function send(kind,peer,fields)
+    if not modem or not number then return false end
+    local p=fields or {}
+    p.protocol,p.kind,p.from,p.number,p.session=PROTOCOL,kind,id,number,session
+    if peer then p.to,p.forSession=peer.id,peer.session end
+    return invoke(modem,"transmit",CHANNEL,CHANNEL,p)
+  end
+  local function hello()
+    local label=os.getComputerLabel() or ("Terminal "..id)
+    send("hello",nil,{label=tostring(label):sub(1,32)})
+    nextHello=os.clock()+2
+  end
+  local function chooseNumber()
+    local used={}
+    for _,p in pairs(peers) do used[p.number]=true end
+    local free={}
+    for n=10,99 do if not used[n] then free[#free+1]=n end end
+    number=#free>0 and free[math.random(#free)] or nil
+    if number then save(); hello(); info("Your number: "..number)
+    else info("No free phone number") end
+  end
+  local function chooseIfConflict()
+    if not number then chooseNumber(); return end
+    for _,p in pairs(peers) do
+      if p.number==number and p.id<id then chooseNumber(); return end
+    end
+  end
+  local function peerOf(c) return {id=c.peer,session=c.peerSession} end
+  local function signal(kind,c,fields)
+    local p=fields or {}; p.call=c.key
+    return send(kind,peerOf(c),p)
+  end
+  local function clearAudio()
+    if call then
+      if call.playing then invoke(speaker,"stop") end
+      call.audio={}; call.audioSize=0; call.playing=false
+    end
+  end
+  local function finish(reason,tell)
+    local c=call
+    if c then
+      if tell then signal("end",c,{reason=reason}) end
+      ended[c.key]={expires=os.clock()+30,peer=c.peer,session=c.peerSession}
+      clearAudio()
+      call=nil
+    end
+    info(reason)
+  end
+  local function closeModem()
+    if modem and owned then invoke(modem,"close",CHANNEL) end
+    modem,owned=nil,false
+  end
+  local function scan()
+    local list=peripheral.getNames()
+    table.sort(list)
+    local selected,newSpeaker,newMic=nil,nil,nil
+    for _,name in ipairs(list) do
+      local ok,kind=pcall(peripheral.getType,name)
+      if ok then
+        if kind=="modem" then
+          local success,wireless=invoke(name,"isWireless")
+          if success and wireless and not selected then selected=name end
+        elseif kind=="speaker" and not newSpeaker then newSpeaker=name
+        elseif kind=="microphone" and SIDES[name] and not newMic then newMic=name end
+      end
+    end
+    if mic~=newMic and call then call.muted=true; call.micReady=false end
+    if speaker~=newSpeaker and call then clearAudio() end
+    speaker,mic=newSpeaker,newMic
+    if modem~=selected then
+      if call then finish("Connection changed",true) end
+      closeModem()
+      peers={}
+      if selected then
+        local ok,already=invoke(selected,"isOpen",CHANNEL)
+        if ok and (already or invoke(selected,"open",CHANNEL)) then
+          modem,owned=selected,not already
+          hello()
+        end
+      end
+    end
+    nextScan=os.clock()+2
+  end
+  local function begin(peer,kind,key)
+    local now=os.clock()
+    call={peer=peer.id,peerSession=peer.session,peerNumber=peer.number,key=key,state=kind,
+      started=now,last=now,nextSignal=now,nextTone=now,tone=0,muted=true,micReady=false,
+      audio={},audioSize=0,sequence=0,lastSequence=0,playing=false}
+    return call
+  end
+  local function connect(c)
+    c.state="active"; c.connected=os.clock(); c.last=os.clock(); c.nextSignal=0
+    c.muted=true; c.micReady=false
+    info("Connected. Press Talk to enable microphone.")
+  end
+  local function validPacket(p)
+    return type(p)=="table" and p.protocol==PROTOCOL and idOK(p.from) and p.from~=id and
+      numberOK(p.number) and type(p.session)=="string" and #p.session<=96 and type(p.kind)=="string"
+  end
+  local function matched(p)
+    return call and call.peer==p.from and call.peerSession==p.session and call.key==p.call
+  end
+  local function addAudio(p,c)
+    if c.state~="active" or not speaker or type(p.data)~="string" or #p.data>1024 or
+      type(p.samples)~="number" or p.samples%1~=0 or p.samples<1 or p.samples>8192 or
+      #p.data~=math.ceil(p.samples/8) or not idOK(p.seq) or p.seq<=c.lastSequence then return end
+    c.lastSequence=p.seq
+    -- A bounded jitter buffer, independently decodable packets.
+    local ok,samples=pcall(function() return dfpwm.make_decoder()(p.data) end)
+    if not ok then return end
+    while #samples>p.samples do samples[#samples]=nil end
+    if c.audioSize==0 then c.audioSince=os.clock() end
+    c.audio[#c.audio+1]=samples; c.audioSize=c.audioSize+#samples
+    while c.audioSize>48000 and #c.audio>0 do
+      c.audioSize=c.audioSize-#table.remove(c.audio,1)
+    end
+  end
+  local function receive(p)
+    if not validPacket(p) then return end
+    if p.kind=="hello" then
+      local old=peers[p.from]
+      peers[p.from]={id=p.from,session=p.session,number=p.number,last=os.clock(),
+        label=type(p.label)=="string" and p.label:sub(1,32):gsub("[%z\1-\31\127]","") or ("Terminal "..p.from)}
+      chooseIfConflict()
+      if not old or old.session~=p.session then hello() end
+      return
+    end
+    if p.kind=="bye" then
+      local old=peers[p.from]
+      if old and old.session==p.session then peers[p.from]=nil end
+      if call and call.peer==p.from and call.peerSession==p.session then finish("Other phone offline",false) end
+      return
+    end
+    if p.to~=id or p.forSession~=session or type(p.call)~="string" or #p.call>128 then return end
+    local peer=peers[p.from]
+    if not peer or peer.session~=p.session then return end
+    peer.last=os.clock()
+    if p.kind=="invite" then
+      local previous=ended[p.call]
+      if previous and previous.peer==p.from and previous.session==p.session then
+        send("end",peer,{call=p.call,reason="Call ended"}); return
+      end
+      if matched(p) then
+        if call.state=="active" then signal("answer",call)
+        elseif call.state=="incoming" then signal("ringing",call) end
+        return
+      end
+      if call and call.state=="dialing" and call.peer==p.from and p.from<id then
+        finish("Switching call",true)
+      end
+      if call then send("busy",peer,{call=p.call}); return end
+      begin(peer,"incoming",p.call)
+      signal("ringing",call)
+      info("Incoming call from "..peer.number)
+      notify("What'sJuz: "..peer.number.." calling. Open What'sJuz.")
+      return
+    end
+    if not matched(p) then return end
+    local c=call
+    c.last=os.clock()
+    if p.kind=="answer" and c.state=="dialing" then
+      connect(c); signal("alive",c)
+    elseif p.kind=="alive" and c.state=="active" then
+      -- Both peers must remain online.
+    elseif p.kind=="alive" and c.state=="dialing" then
+      connect(c); signal("alive",c)
+    elseif p.kind=="busy" and c.state=="dialing" then finish("Line busy",false)
+    elseif p.kind=="end" then finish("Call ended",false)
+    elseif p.kind=="audio" then addAudio(p,c)
+    end
+  end
+  local function playAudio(c)
+    if not speaker or c.audioSize==0 then return end
+    if c.audioSize<4800 and not c.playing and os.clock()-(c.audioSince or 0)<0.25 then return end
+    local data={}
+    local count=0
+    for _,chunk in ipairs(c.audio) do
+      for _,value in ipairs(chunk) do data[#data+1]=value end
+      count=count+1
+      if #data>=9600 then break end
+    end
+    local ok,queued=invoke(speaker,"playAudio",data,1)
+    if ok and queued then
+      for _=1,count do c.audioSize=c.audioSize-#table.remove(c.audio,1) end
+      c.playing=true
+    end
+  end
+  local function capture(c)
+    if c.muted or not mic then return end
+    local limit=c.micReady and 8192 or 16384
+    local ok,data=invoke(mic,"pullAudio",limit)
+    if not ok or type(data)~="table" then c.muted=true; info("Microphone unavailable"); return end
+    if not c.micReady then
+      if #data<limit then c.micReady=true; info("Microphone on") end
+      return
+    end
+    if #data==0 or #data>limit then return end
+    local length=#data
+    for i=1,length do
+      local n=data[i]
+      if type(n)~="number" or n%1~=0 or n< -128 or n>127 then
+        c.muted=true; info("Unsupported microphone audio format"); return
+      end
+    end
+    for i=length+1,math.ceil(length/8)*8 do data[i]=0 end
+    local compressed=dfpwm.make_encoder()(data)
+    c.sequence=c.sequence+1
+    signal("audio",c,{data=compressed,samples=length,seq=c.sequence})
+  end
+  local function tone(c,now)
+    if not speaker or now<c.nextTone then return end
+    c.tone=(c.tone+1)%6
+    if c.state=="incoming" then
+      local notes={[1]=12,[2]=16,[3]=19}
+      if notes[c.tone] then invoke(speaker,"playNote","pling",1,notes[c.tone]) end
+      c.nextTone=now+(c.tone==3 and 0.9 or 0.22)
+    else
+      if c.tone==1 or c.tone==2 then invoke(speaker,"playNote","bass",0.9,11) end
+      c.nextTone=now+(c.tone==2 and 1.3 or 0.25)
+    end
+  end
+  local function tick()
+    if not enabled then return end
+    local now=os.clock()
+    if now>=nextScan then
+      if not installed() then
+        if call then finish("What'sJuz removed",true) end
+        send("bye"); closeModem(); enabled=false; return
+      end
+      scan()
+    end
+    for peer,p in pairs(peers) do if now-p.last>9 then peers[peer]=nil end end
+    for key,e in pairs(ended) do if now>e.expires then ended[key]=nil end end
+    if not number then chooseNumber() end
+    if now>=nextHello then hello() end
+    if not call then return end
+    local c=call
+    if not modem then finish("No wireless modem",false); return end
+    if c.state=="active" then
+      if now-c.last>8 then finish("Connection lost",false); return end
+      if now>=c.nextSignal then signal("alive",c); c.nextSignal=now+1 end
+      capture(c); playAudio(c)
+    else
+      if now-c.started>25 then finish("No answer",true); return end
+      if c.state=="dialing" and now>=c.nextSignal then
+        signal("invite",c); c.nextSignal=now+1
+      end
+      tone(c,now)
+    end
+  end
+  local function online()
+    enabled=true
+    if not number then chooseNumber() end
+    save(); scan(); hello()
+    info(modem and ("Ready: "..tostring(number)) or "Connect a wireless modem")
+  end
+  local function command(name,value)
+    if name=="initialize" then
+      if not activated and installed() then activated=true; online() end
+    elseif name=="online" and installed() then activated=true; online()
+    elseif name=="offline" then
+      if call then finish("Offline",true) end
+      send("bye"); enabled=false; closeModem(); peers={}; save(); info("Offline")
+    elseif name=="dial" then
+      if not enabled or not modem or not number then info("Connect a wireless modem"); return end
+      if call then info("Already in a call"); return end
+      local n=tonumber(value)
+      if not numberOK(n) or n==number then info("Enter a different two-digit number"); return end
+      local peer
+      for _,p in pairs(peers) do
+        if p.number==n then
+          if peer then info("Number resolving. Try again."); return end
+          peer=p
+        end
+      end
+      if not peer then info("Number offline: "..n); return end
+      serial=serial+1
+      local c=begin(peer,"dialing",session..":"..serial)
+      signal("invite",c); c.nextSignal=os.clock()+1; info("Calling "..n)
+    elseif name=="answer" and call and call.state=="incoming" then
+      connect(call); signal("answer",call)
+    elseif name=="end" and call then finish("Call ended",true)
+    elseif name=="talk" and call and call.state=="active" then
+      if not mic then info("Connect a microphone"); return end
+      call.muted=not call.muted
+      call.micReady=false
+      info(call.muted and "Microphone off" or "Preparing microphone...")
+    end
+  end
+  function self.command(name,value)
+    if name=="initialize" or name=="online" or name=="offline" or name=="dial" or
+      name=="answer" or name=="end" or name=="talk" then
+      if name=="dial" and not numberOK(tonumber(value)) then return false,"Invalid number" end
+      os.queueEvent("juzeppe_phone_command",name,value)
+      return true
+    end
+    return false,"Unknown phone operation"
+  end
+  function self.status()
+    local list={}
+    for _,p in pairs(peers) do list[#list+1]={number=p.number,label=p.label,id=p.id} end
+    table.sort(list,function(a,b) return a.number==b.number and a.id<b.id or a.number<b.number end)
+    local c
+    if call then c={state=call.state,number=call.peerNumber,muted=call.muted,
+      micReady=call.micReady,seconds=call.connected and math.floor(os.clock()-call.connected) or 0} end
+    return {enabled=enabled,number=number,online=enabled and modem~=nil,peers=list,call=c,
+      speaker=speaker~=nil,microphone=mic~=nil,notice=notice or ""}
+  end
+  function self.run()
+    local v=util.read(HOME.."enabled")
+    if installed() and v then
+      activated=true
+      local n=tonumber(util.read(HOME.."number") or "")
+      if numberOK(n) then number=n end
+      if v=="on" then online() end
+    end
+    timer=os.startTimer(0.2)
+    while true do
+      local e,a,b,c,d=os.pullEventRaw()
+      if e=="juzeppe_phone_command" then command(a,b)
+      elseif enabled and e=="modem_message" and a==modem and b==CHANNEL and c==CHANNEL then receive(d)
+      elseif e=="timer" and a==timer then
+        tick()
+        timer=os.startTimer(call and (call.state=="active" and 0.1 or 0.2) or (enabled and 0.5 or 2))
+      elseif enabled and (e=="peripheral" or e=="peripheral_detach") then scan()
+      elseif e=="speaker_audio_empty" and call and a==speaker then
+        call.playing=false; playAudio(call)
+      elseif e=="juzeppe_packages_changed" and enabled and not installed() then
+        command("offline")
+      end
+    end
+  end
+  function self.close()
+    if call then finish("Phone stopped",true) end
+    send("bye"); closeModem()
+    if timer then os.cancelTimer(timer) end
   end
   return self
 end
