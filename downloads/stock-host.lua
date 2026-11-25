@@ -1,4 +1,4 @@
--- Juzeppe Stock Host 1.0.0
+-- Juzeppe Stock Host 1.1.0
 -- Run on a computer next to a Create Stock Ticker with a wireless modem.
 local REQUEST,REPLY=48530,48531
 local PROTOCOL="juzeppe.stock/1"
@@ -45,9 +45,19 @@ local function reply(side,msg,kind,extra)
   peripheral.call(side,"transmit",REPLY,REQUEST,extra)
 end
 local function request(side,msg)
-  if type(msg)~="table" or msg.protocol~=PROTOCOL or msg.kind~="request" or msg.to~=id or
+  if type(msg)~="table" or msg.protocol~=PROTOCOL or (msg.kind~="request" and msg.kind~="native") or msg.to~=id or
     type(msg.from)~="number" or msg.from%1~=0 or msg.from<0 or msg.from>2147483647 or
     type(msg.token)~="string" or #msg.token>96 then return end
+  if msg.kind=="native" then
+    if not juzeppebridge or not juzeppebridge.offerNative then
+      reply(side,msg,"error",{error="Install Bridge 0.2.0 and reboot host"})
+      return
+    end
+    local token,err=juzeppebridge.offerNative(msg.from)
+    if not token then reply(side,msg,"error",{error=err or "Cannot offer native menu"}); return end
+    reply(side,msg,"native",{ticket=token})
+    return
+  end
   local ok,rows,err=pcall(snapshot)
   if not ok then reply(side,msg,"error",{error=tostring(rows):sub(1,160)}); return end
   if not rows then reply(side,msg,"error",{error=err}); return end

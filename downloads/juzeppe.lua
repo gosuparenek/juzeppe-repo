@@ -1,7 +1,7 @@
--- JuzeppeOS 0.8.4 Sandstone installer / launcher
+-- JuzeppeOS 0.8.5 Sandstone installer / launcher
 local args={...}
 local root="/juzeppe"
-local version="0.8.4"
+local version="0.8.5"
 local function read(path)
   if not fs.exists(path) or fs.isDir(path) then return nil end
   local f=fs.open(path,"r")
@@ -237,7 +237,7 @@ local function launch()
   if k.processes[pid] then desktop=pid end
 end
 local ok,err=xpcall(function()
-  journal("kernel","boot","0.8.4")
+  journal("kernel","boot","0.8.5")
   _G.__juzeppe_active_network=network
   k.spawn("network",function()
     network:start()
@@ -271,7 +271,7 @@ return {refresh=false,draw=function(c)
   local P=c.colors
   c.text(2,1,"J U Z E P P E  /  OS",P.accent)
   c.text(2,3,"Sandstone Edition")
-  c.text(2,4,"Version 0.8.4 / API 1")
+  c.text(2,4,"Version 0.8.5 / API 1")
   c.text(2,5,"CraftOS / CC: Tweaked")
   c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
   c.status("Designed for Juzeppe")
@@ -285,7 +285,7 @@ end}
   "name_ru": "Об ОС",
   "description": "System",
   "description_ru": "Система",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "api": 1,
   "entry": "main.lua",
   "order": 8,
@@ -1225,7 +1225,7 @@ end}
   "name_ru": "Магазин",
   "description": "Packages",
   "description_ru": "Пакеты",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "api": 1,
   "entry": "main.lua",
   "order": 5,
@@ -2086,7 +2086,7 @@ local function drawBar()
   local available=clockX-x
   if available<4 then return end
   if #tasks==0 then
-    if available>=6 then line(x+1,H,"v0.8.4",P.tint,P.ink) end
+    if available>=6 then line(x+1,H,"v0.8.5",P.tint,P.ink) end
     return
   end
   local count=math.max(1,math.floor(available/9))
@@ -2535,7 +2535,7 @@ local function fileTransfer(transfer)
   end
 end
 local function run()
-  journal("desktop","start","0.8.4")
+  journal("desktop","start","0.8.5")
   refresh()
   pollDesktop()
   local netRevision=network.revision
@@ -3970,9 +3970,16 @@ return function(win,c,grants,locale)
   end
   if grants["stock.native"] then
     api.stock=api.stock or {}
-    api.stock.openNative=function()
+    api.stock.openNative=function(id)
       if type(juzeppebridge)~="table" or type(juzeppebridge.openStock)~="function" then
         return false,"Install Juzeppe Bridge on the Minecraft server"
+      end
+      if id~=nil then
+        if not grants["stock.remote"] then return false,"Wireless stock permission required" end
+        if type(juzeppebridge.openRemote)~="function" then return false,"Update Bridge to 0.2.0" end
+        local ticket,err=c.stockRemote(id,true)
+        if not ticket then return false,err end
+        return juzeppebridge.openRemote(ticket)
       end
       return juzeppebridge.openStock()
     end
@@ -4173,9 +4180,9 @@ function M.new(host,P,locale,config)
     local dataPath="/juzeppe/data/"..app.id
     if not fs.exists(dataPath) then fs.makeDir(dataPath) end
     local c={
-      stockRemote=function(id)
+      stockRemote=function(id,native)
         for _,job in ipairs(self.jobs) do
-          if job.owner==win and job.thread==coroutine.running() then return config.kernel.stock.read(id) end
+          if job.owner==win and job.thread==coroutine.running() then return config.kernel.stock.read(id,native) end
         end
         return nil,"Use a background job to read remote stock"
       end,
@@ -4607,7 +4614,7 @@ return M
   "Interrupted": "Прервано",
   "Could not save message": "Не удалось сохранить сообщение",
   "Network changed": "Сеть изменена",
-  "Version 0.8.4 / API 1": "Версия 0.8.4 / API 1"
+  "Version 0.8.5 / API 1": "Версия 0.8.5 / API 1"
 }
 ]=],
     ["system/session.lua"]=[=[
@@ -5052,7 +5059,7 @@ return function()
       end
     end
   end
-  function self.read(id)
+  function self.read(id,native)
     if not running then return nil,"Stock service stopped" end
     if type(id)~="number" or id%1~=0 or id<0 or id>2147483647 then
       return nil,"Invalid computer ID"
@@ -5061,10 +5068,10 @@ return function()
     if not side then return nil,"Connect a wireless modem" end
     serial=serial+1
     local token=tostring(os.getComputerID()).."-"..tostring(os.epoch("utc")).."-"..serial
-    local req={token=token,side=side,host=id,parts={},received=0,rowsCount=0,timer=os.startTimer(12)}
+    local req={token=token,side=side,host=id,native=native,parts={},received=0,rowsCount=0,timer=os.startTimer(12)}
     pending[token]=req
     local ok,err=pcall(peripheral.call,side,"transmit",REQUEST,REPLY,
-      {protocol=PROTOCOL,kind="request",from=os.getComputerID(),to=id,token=token})
+      {protocol=PROTOCOL,kind=native and "native" or "request",from=os.getComputerID(),to=id,token=token})
     if not ok then finish(req,nil,tostring(err)) end
     while not req.done do os.pullEventRaw("juzeppe_stock_result") end
     return req.rows,req.err
@@ -5097,6 +5104,10 @@ return function()
       if not req or req.side~=a or d.to~=os.getComputerID() or d.from~=req.host then return end
       if d.kind=="error" then
         finish(req,nil,type(d.error)=="string" and d.error:sub(1,160) or "Stock host error")
+        return
+      end
+      if req.native then
+        if d.kind=="native" and type(d.ticket)=="string" and #d.ticket==36 then finish(req,d.ticket) end
         return
       end
       if d.kind~="page" or type(d.total)~="number" or d.total%1~=0 or d.total<1 or

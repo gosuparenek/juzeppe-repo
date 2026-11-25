@@ -30,6 +30,6 @@ jobs:
         run: gradle --no-daemon build
       - uses: actions/upload-artifact@v4
         with:
-          name: juzeppe-bridge-0.1.0
-          path: bridge/build/libs/juzeppe-bridge-0.1.0.jar
+          name: juzeppe-bridge-0.2.0
+          path: bridge/build/libs/juzeppe-bridge-0.2.0.jar
           if-no-files-found: error
