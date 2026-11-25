@@ -1,7 +1,7 @@
--- JuzeppeOS 0.8.1 Sandstone installer / launcher
+-- JuzeppeOS 0.8.2 Sandstone installer / launcher
 local args={...}
 local root="/juzeppe"
-local version="0.8.1"
+local version="0.8.2"
 local function read(path)
   if not fs.exists(path) or fs.isDir(path) then return nil end
   local f=fs.open(path,"r")
@@ -235,7 +235,7 @@ local function launch()
   if k.processes[pid] then desktop=pid end
 end
 local ok,err=xpcall(function()
-  journal("kernel","boot","0.8.1")
+  journal("kernel","boot","0.8.2")
   _G.__juzeppe_active_network=network
   k.spawn("network",function()
     network:start()
@@ -266,7 +266,7 @@ return {refresh=false,draw=function(c)
   local P=c.colors
   c.text(2,1,"J U Z E P P E  /  OS",P.accent)
   c.text(2,3,"Sandstone Edition")
-  c.text(2,4,"Version 0.8.1 / API 1")
+  c.text(2,4,"Version 0.8.2 / API 1")
   c.text(2,5,"CraftOS / CC: Tweaked")
   c.raw(2,6,c.tr("Computer").." #"..os.getComputerID())
   c.status("Designed for Juzeppe")
@@ -280,7 +280,7 @@ end}
   "name_ru": "Об ОС",
   "description": "System",
   "description_ru": "Система",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "api": 1,
   "entry": "main.lua",
   "order": 8,
@@ -1220,7 +1220,7 @@ end}
   "name_ru": "Магазин",
   "description": "Packages",
   "description_ru": "Пакеты",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "api": 1,
   "entry": "main.lua",
   "order": 5,
@@ -2081,7 +2081,7 @@ local function drawBar()
   local available=clockX-x
   if available<4 then return end
   if #tasks==0 then
-    if available>=6 then line(x+1,H,"v0.8.1",P.tint,P.ink) end
+    if available>=6 then line(x+1,H,"v0.8.2",P.tint,P.ink) end
     return
   end
   local count=math.max(1,math.floor(available/9))
@@ -2530,7 +2530,7 @@ local function fileTransfer(transfer)
   end
 end
 local function run()
-  journal("desktop","start","0.8.1")
+  journal("desktop","start","0.8.2")
   refresh()
   pollDesktop()
   local netRevision=network.revision
@@ -3657,7 +3657,7 @@ function M.validateManifest(m)
     local seen={}
     for i,v in pairs(m.permissions) do
       if type(i)~="number" or i%1~=0 or i<1 or i>#m.permissions or
-        (v~="desktop.files" and v~="printer" and v~="clipboard") or seen[v] then return nil,"Invalid permission" end
+        (v~="desktop.files" and v~="printer" and v~="clipboard" and v~="stock.read") or seen[v] then return nil,"Invalid permission" end
       seen[v]=true
     end
   end
@@ -3940,6 +3940,24 @@ return function(win,c,grants,locale)
   end
   if grants.clipboard then
     api.clipboard={getText=function() return c.clipboard:getText() end,setText=function(_,v) assert(type(v)=="string"); c.clipboard:setText(v) end}
+  end
+  if grants["stock.read"] then
+    api.stock={
+      sources=function()
+        local result={}
+        for _,name in ipairs(peripheral.getNames()) do
+          if peripheral.hasType(name,"Create_StockTicker") then result[#result+1]=name end
+        end
+        table.sort(result)
+        return result
+      end,
+      read=function(name)
+        if type(name)~="string" or not peripheral.hasType(name,"Create_StockTicker") then
+          error("Stock Ticker disconnected",2)
+        end
+        return peripheral.call(name,"stock")
+      end
+    }
   end
   if grants.printer then
     local function printer(n) return peripheral.hasType(n,"printer") end
@@ -4565,7 +4583,7 @@ return M
   "Interrupted": "Прервано",
   "Could not save message": "Не удалось сохранить сообщение",
   "Network changed": "Сеть изменена",
-  "Version 0.8.1 / API 1": "Версия 0.8.1 / API 1"
+  "Version 0.8.2 / API 1": "Версия 0.8.2 / API 1"
 }
 ]=],
     ["system/session.lua"]=[=[
