@@ -1,0 +1,34 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.107'
+}
+group = 'icu.juzeppe'
+version = '0.1.0'
+base { archivesName = 'juzeppe-bridge' }
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.createmod.net' }
+    maven { url = 'https://maven.ithundxr.dev/snapshots' }
+    maven { url = 'https://maven.squiddev.cc' }
+    exclusiveContent {
+        forRepository { maven { url = 'https://api.modrinth.com/maven' } }
+        filter { includeGroup 'maven.modrinth' }
+    }
+}
+neoForge {
+    version = '21.1.200'
+    mods { juzeppe_bridge { sourceSet sourceSets.main } }
+}
+dependencies {
+    // Create 6.0.8 and CC:T 1.116.1, Minecraft 1.21.1 NeoForge.
+    compileOnly 'maven.modrinth:create:88L641Un'
+    compileOnly 'maven.modrinth:gu7yAYhd:SQI2qmh5'
+    compileOnly 'net.createmod.ponder:Ponder-NeoForge-1.21.1:1.0.64'
+    compileOnly 'com.tterrag.registrate:Registrate:MC1.21-1.3.0+67'
+    compileOnly 'dev.engine-room.flywheel:flywheel-neoforge-api-1.21.1:1.0.5'
+}
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
