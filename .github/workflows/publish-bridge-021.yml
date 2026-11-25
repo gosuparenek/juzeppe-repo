@@ -1,0 +1,41 @@
+name: Publish Juzeppe Bridge 0.2.1
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-bridge-021.yml']
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+  statuses: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: juzeppe-bridge-v0.2.1
+      JAR: juzeppe-bridge-0.2.1.jar
+    steps:
+      - name: Download successful build
+        run: |
+          gh run download 45699712059 --repo "$GH_REPO" --name juzeppe-bridge-0.2.1 --dir dist
+          test -s "dist/$JAR"
+          unzip -tq "dist/$JAR"
+      - name: Publish direct JAR download
+        run: |
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release view "$TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' | grep -Fx "$JAR"
+          else
+            gh release create "$TAG" "dist/$JAR" --repo "$GH_REPO" --target 0aa109a6d29b3123e8071a1e5c9e25b561746586 --title "Juzeppe Bridge 0.2.1" --notes "Server-side mod for NeoForge 1.21.1. Build succeeded. In-game menu opening and ordering have not yet been verified." --prerelease
+          fi
+          gh release view "$TAG" --repo "$GH_REPO" --json url,assets
+      - name: Record publication status
+        if: always()
+        env:
+          JOB_RESULT: ${{ job.status }}
+        run: |
+          STATE=failure
+          if [ "$JOB_RESULT" = success ]; then STATE=success; fi
+          gh api "repos/$GH_REPO/statuses/$GITHUB_SHA" -f state="$STATE" -f context="bridge-release" -f target_url="https://github.com/$GH_REPO/releases/tag/$TAG" -f description="Direct JAR publication"
